@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">KotlinLlamaCpp</string>
+    <string name="app_name">น้องมล AI</string>
     <string name="title_activity_main">GGUF Inference</string>
 </resources>
