@@ -1,5 +1,4 @@
 name: Android CI
-
 on:
   push:
     branches: [ "main" ]
@@ -7,7 +6,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,9 +15,15 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+          cache: 'gradle'
+
+      - name: Accept Licenses & Install NDK
+        run: |
+          yes | sdkmanager --licenses
+          sdkmanager "ndk;29.0.13846066"
 
       - name: Grant permission
         run: chmod +x ./gradlew
 
-      - name: Build APK
-        run: ./gradlew assembleDebug
+      - name: Clean and Build APK
+        run: ./gradlew clean assembleDebug
