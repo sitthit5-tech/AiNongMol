@@ -22,7 +22,6 @@ jobs:
 
       - name: Accept Licenses & Install NDK
         run: |
-          # ใช้ Path เต็มเพื่อความชัวร์ หรือใช้คำสั่งผ่าน Action ที่เซต Path มาให้แล้ว
           yes | sdkmanager --licenses
           sdkmanager "ndk;29.0.13846066"
 
@@ -31,3 +30,9 @@ jobs:
 
       - name: Clean and Build APK
         run: ./gradlew clean assembleDebug
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AiNongMol-V1-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
