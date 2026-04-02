@@ -17,8 +17,12 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Accept Licenses & Install NDK
         run: |
+          # ใช้ Path เต็มเพื่อความชัวร์ หรือใช้คำสั่งผ่าน Action ที่เซต Path มาให้แล้ว
           yes | sdkmanager --licenses
           sdkmanager "ndk;29.0.13846066"
 
