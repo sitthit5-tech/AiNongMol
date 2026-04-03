@@ -37,17 +37,31 @@ class MainViewModel(
                     FileOutputStream(file).use { output -> input.copyTo(output) }
                 }
 
+                // 🔍 ส่องหา Class LlamaContext
                 val clazz = listOf("org.nehuatl.llamacpp.LlamaContext", "org.nehuatl.llamacpp.LLamaContext")
                     .firstNotNullOfOrNull { try { Class.forName(it) } catch (e: Exception) { null } }
-                    ?: throw Exception("ไม่พบ Library")
+                    ?: throw Exception("หา Library ไม่เจอ")
 
-                ctx = clazz.getConstructor(String::class.java).newInstance(file.absolutePath)
+                // 🔥 ท่าแก้เผด็จศึก: หา Constructor ที่รับ String ถ้าไม่มีให้ใช้ Constructor เปล่า
+                val constructor = clazz.constructors.firstOrNull { it.parameterTypes.size == 1 && it.parameterTypes[0] == String::class.java }
+                
+                ctx = if (constructor != null) {
+                    constructor.newInstance(file.absolutePath)
+                } else {
+                    // ถ้าไม่มี Constructor รับ String ให้ลองสร้างแบบเปล่า แล้วหา method load
+                    val instance = clazz.getConstructor().newInstance()
+                    val loadMethod = clazz.methods.firstOrNull { it.name.contains("load", ignoreCase = true) }
+                    loadMethod?.invoke(instance, file.absolutePath)
+                    instance
+                }
                 
                 _modelName.value = name
                 _chatState.value = ChatUiState.Idle
             } catch (e: Exception) {
-                _modelName.value = "❌ " + (e.message ?: "Load Fail")
-                _chatState.value = ChatUiState.Error(e.message ?: "Load Fail")
+                // ดึงสาเหตุที่แท้จริงออกมาโชว์
+                val cause = e.cause?.toString() ?: e.toString()
+                _modelName.value = "❌ พลาด: $cause"
+                _chatState.value = ChatUiState.Error(cause)
             }
         }
     }
@@ -60,35 +74,17 @@ class MainViewModel(
 
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.Generating("")
-            val prompt = _messages.value.takeLast(4).joinToString("\n") { 
-                "${if (it.role == "user") "User" else "Assistant"}: ${it.content}" 
-            } + "\nAssistant:"
-
             try {
                 val methods = currentCtx.javaClass.methods
-                
-                // 🔍 1. หา Method สำหรับส่ง Prompt (เช่น setPrompt, feed, tokenize)
-                val setPromptMethod = methods.firstOrNull { 
-                    val n = it.name.lowercase()
-                    (n.contains("prompt") || n.contains("feed") || n.contains("text")) && it.parameterTypes.size == 1
-                }
-                
-                // 🔍 2. หา Method completion(Int, Map)
-                val completionMethod = methods.firstOrNull { 
-                    it.name == "completion" && it.parameterTypes.size == 2
-                }
+                val setPrompt = methods.firstOrNull { it.name.lowercase().contains("prompt") }
+                val completion = methods.firstOrNull { it.name == "completion" }
 
-                // 🔥 ปฏิบัติการ:
-                setPromptMethod?.invoke(currentCtx, prompt)
+                setPrompt?.invoke(currentCtx, text)
+                val result = completion?.invoke(currentCtx, 128, mapOf("temp" to 0.7))
 
-                val params = mapOf("temperature" to 0.7, "top_k" to 40)
-                val result = completionMethod?.invoke(currentCtx, 128, params)
-
-                val textResult = result?.toString()?.trim() ?: "ไม่มีคำตอบ"
-                _messages.value = _messages.value + ChatMessage("assistant", textResult)
-
+                _messages.value = _messages.value + ChatMessage("assistant", result?.toString()?.trim() ?: "AI เงียบไป...")
             } catch (e: Exception) {
-                _messages.value = _messages.value + ChatMessage("assistant", "Error: " + (e.cause?.message ?: e.message))
+                _messages.value = _messages.value + ChatMessage("assistant", "Error: ${e.cause ?: e.message}")
             }
             _chatState.value = ChatUiState.Idle
         }
