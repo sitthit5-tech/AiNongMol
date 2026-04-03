@@ -61,12 +61,15 @@ class MainViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.Generating("")
             try {
-                // 🔥 ท่าส่ง Prompt เข้า Params ตรงๆ ตามที่พี่แนะนำ (นิ่งที่สุด)
+                // 🧠 จัด Format Prompt ให้โมเดลเข้าใจง่ายขึ้น
+                val formattedPrompt = "User: $text\nAssistant:"
+                
+                // 🔥 ใช้ Signature ที่เป๊ะที่สุด: completion(Int, Map<String, Any>)
                 val response = currentCtx.completion(
-                    128,
-                    mapOf(
-                        "prompt" to text,
-                        "temp" to 0.7,
+                    128, 
+                    mapOf<String, Any>(
+                        "prompt" to formattedPrompt,
+                        "temperature" to 0.7,
                         "n_predict" to 128
                     )
                 )
@@ -79,7 +82,7 @@ class MainViewModel(
             } catch (e: Exception) {
                 _messages.value = _messages.value + ChatMessage(
                     "assistant",
-                    "Error: ${e.message}"
+                    "❌ Error: ${e.message}"
                 )
             }
             _chatState.value = ChatUiState.Idle
