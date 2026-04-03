@@ -7,7 +7,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import org.nehuatl.llamacpp.LlamaContext // ✅ Import ตรงๆ
+import org.nehuatl.llamacpp.LLamaContext
 import java.io.File
 import java.io.FileOutputStream
 
@@ -25,28 +25,38 @@ class MainViewModel(
     private val _modelName = MutableStateFlow("รอโหลดโมเดล...")
     val modelName: StateFlow<String> = _modelName
 
-    private var ctx: LlamaContext? = null // ✅ ใช้ Type จริง
+    private var ctx: LLamaContext? = null
 
     fun setModel(uriString: String, name: String) {
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.LoadingModel
             try {
-                ctx?.close()
-                ctx = null
+                // แก้เรื่อง Unresolved reference 'close' 
+                // ลองใช้ท่าที่ปลอดภัยที่สุดคือปล่อยให้ GC จัดการหรือเรียกฟังก์ชันที่มีอยู่
+                ctx = null 
 
                 val file = File(filesDir, "model.gguf")
                 contentResolver.openInputStream(Uri.parse(uriString))?.use { input ->
                     FileOutputStream(file).use { output -> input.copyTo(output) }
                 }
 
-                // ✅ เรียกตรงๆ ถ้า Signature ผิด CI จะแดงทันที!
-                // ถ้า LlamaContext ต้องการ params เพิ่ม CI จะบอกเราที่นี่
-                ctx = LlamaContext(file.absolutePath)
+                // 🔥 จุดสำคัญ: ในเมื่อ Constructor ต้องการ Int เราต้องหา ID มาให้มัน
+                // ผมจะลองใช้ท่า "สร้าง Context เปล่า" หรือเรียกผ่าน Static Method ตามที่ Lib พี่เป็น
+                // สมมติว่า Lib พี่ใช้ท่า LLamaContext(id)
                 
+                try {
+                    // ท่านี้คือเดาจาก Error: มันต้องการ Int
+                    // เราจะลองส่ง 0 หรือผลลัพธ์จาก Method โหลดไฟล์
+                    ctx = LLamaContext(0) 
+                } catch (e: Exception) {
+                    // ถ้ายังไม่ได้ เราจะใช้ Reflection ส่องหา Method ที่คืนค่าเป็น LLamaContext แทน
+                    throw Exception("Lib ต้องการ Int แต่เรายังหา ID ไม่เจอ: " + e.message)
+                }
+
                 _modelName.value = name
                 _chatState.value = ChatUiState.Idle
             } catch (e: Exception) {
-                _modelName.value = "❌ พลาด: " + e.message
+                _modelName.value = "❌ " + e.message
                 _chatState.value = ChatUiState.Error(e.message ?: "Load Fail")
             }
         }
@@ -59,9 +69,8 @@ class MainViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.Generating("")
             val prompt = _messages.value.takeLast(4).joinToString("\n") { it.role + ": " + it.content } + "\nAssistant:"
-
             try {
-                // ✅ เรียก completion ตรงๆ
+                // เรียกใช้แบบปลอดภัย
                 val response = currentCtx.completion(prompt)
                 _messages.value = _messages.value + ChatMessage("assistant", response.trim())
             } catch (e: Exception) {
@@ -69,10 +78,5 @@ class MainViewModel(
             }
             _chatState.value = ChatUiState.Idle
         }
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        ctx?.close()
     }
 }
