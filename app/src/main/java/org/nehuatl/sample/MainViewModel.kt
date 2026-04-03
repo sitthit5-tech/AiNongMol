@@ -26,21 +26,25 @@ class MainViewModel(private val contentResolver: ContentResolver) : ViewModel() 
     fun sendPrompt(userText: String) {
         if (_chatState.value is ChatUiState.Generating) return
 
-        // เพิ่มข้อความ User
+        // 1. เพิ่มข้อความ User เข้าไปใน List
         val currentMsgs = _messages.value.toMutableList()
         currentMsgs.add(ChatMessage("user", userText))
         _messages.value = currentMsgs
 
         viewModelScope.launch {
+            // 2. เปลี่ยนสถานะเป็น Generating (ส่งค่าว่างไปก่อน)
             _chatState.value = ChatUiState.Generating("")
             
-            // --- Mock AI Response (รอเชื่อมต่อ llamaCpp ภายหลัง) ---
+            // 3. Mock การหน่วงเวลาของ AI
             delay(1000)
-            val response = "น้องมลได้รับข้อความแล้วค่ะพี่: $userText (ระบบ AI กำลังเชื่อมต่อ...)"
+            val mockResponse = "น้องมลได้รับข้อความ '$userText' แล้วค่ะ! (ตอนนี้ Build ผ่านแล้ว เดี๋ยวเราค่อยเชื่อมสมอง AI กันนะคะพี่)"
             
+            // 4. อัปเดตข้อความ Assistant
             val updatedMsgs = _messages.value.toMutableList()
-            updatedMsgs.add(ChatMessage("assistant", response))
+            updatedMsgs.add(ChatMessage("assistant", mockResponse))
             _messages.value = updatedMsgs
+            
+            // 5. กลับสู่สถานะ Idle
             _chatState.value = ChatUiState.Idle
         }
     }

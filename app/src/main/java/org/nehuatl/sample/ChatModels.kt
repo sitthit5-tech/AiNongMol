@@ -6,7 +6,7 @@ data class ChatMessage(
     val content: String
 )
 
-// 🧠 สถานะของ UI
+// 🧠 สถานะของ UI (รองรับสตรีมข้อความด้วย Generating)
 sealed class ChatUiState {
     object Idle : ChatUiState()
     object LoadingModel : ChatUiState()
