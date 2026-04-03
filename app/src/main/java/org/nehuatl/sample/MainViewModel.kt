@@ -2,10 +2,11 @@ package org.nehuatl.sample
 
 import android.content.ContentResolver
 import android.net.Uri
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.File
@@ -22,46 +23,32 @@ class MainViewModel(
     private val _chatState = MutableStateFlow<ChatUiState>(ChatUiState.Idle)
     val chatState: StateFlow<ChatUiState> = _chatState
 
-    private val _modelName = MutableStateFlow("รอโหลดโมเดล...")
+    private val _modelName = MutableStateFlow("พร้อมใช้งาน")
     val modelName: StateFlow<String> = _modelName
 
     private var ctx: Any? = null
+    private var generationJob: Job? = null
 
     fun setModel(uriString: String, name: String) {
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.LoadingModel
             try {
-                ctx = null 
+                ctx = null
                 val file = File(filesDir, "model.gguf")
                 contentResolver.openInputStream(Uri.parse(uriString))?.use { input ->
                     FileOutputStream(file).use { output -> input.copyTo(output) }
                 }
 
-                // 🔍 ส่องหา Class LlamaContext
                 val clazz = listOf("org.nehuatl.llamacpp.LlamaContext", "org.nehuatl.llamacpp.LLamaContext")
                     .firstNotNullOfOrNull { try { Class.forName(it) } catch (e: Exception) { null } }
-                    ?: throw Exception("หา Library ไม่เจอ")
+                    ?: throw Exception("Library not found")
 
-                // 🔥 ท่าแก้เผด็จศึก: หา Constructor ที่รับ String ถ้าไม่มีให้ใช้ Constructor เปล่า
-                val constructor = clazz.constructors.firstOrNull { it.parameterTypes.size == 1 && it.parameterTypes[0] == String::class.java }
-                
-                ctx = if (constructor != null) {
-                    constructor.newInstance(file.absolutePath)
-                } else {
-                    // ถ้าไม่มี Constructor รับ String ให้ลองสร้างแบบเปล่า แล้วหา method load
-                    val instance = clazz.getConstructor().newInstance()
-                    val loadMethod = clazz.methods.firstOrNull { it.name.contains("load", ignoreCase = true) }
-                    loadMethod?.invoke(instance, file.absolutePath)
-                    instance
-                }
-                
+                ctx = clazz.getConstructor(String::class.java).newInstance(file.absolutePath)
                 _modelName.value = name
                 _chatState.value = ChatUiState.Idle
             } catch (e: Exception) {
-                // ดึงสาเหตุที่แท้จริงออกมาโชว์
-                val cause = e.cause?.toString() ?: e.toString()
-                _modelName.value = "❌ พลาด: $cause"
-                _chatState.value = ChatUiState.Error(cause)
+                _modelName.value = "❌ พลาด: ${e.message}"
+                _chatState.value = ChatUiState.Error(e.message ?: "Load Fail")
             }
         }
     }
@@ -70,23 +57,53 @@ class MainViewModel(
         val currentCtx = ctx ?: return
         if (_chatState.value is ChatUiState.Generating) return
 
-        _messages.value = _messages.value + ChatMessage("user", text)
+        val updatedMessages = _messages.value + ChatMessage("user", text)
+        _messages.value = updatedMessages
 
-        viewModelScope.launch(Dispatchers.IO) {
+        generationJob?.cancel()
+        generationJob = viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.Generating("")
+
             try {
                 val methods = currentCtx.javaClass.methods
                 val setPrompt = methods.firstOrNull { it.name.lowercase().contains("prompt") }
                 val completion = methods.firstOrNull { it.name == "completion" }
 
-                setPrompt?.invoke(currentCtx, text)
-                val result = completion?.invoke(currentCtx, 128, mapOf("temp" to 0.7))
+                // Context Memory: จำย้อนหลัง 8 รอบ
+                val prompt = updatedMessages.takeLast(8).joinToString("\n") {
+                    "${if (it.role == "user") "User" else "Assistant"}: ${it.content}"
+                } + "\nAssistant:"
 
-                _messages.value = _messages.value + ChatMessage("assistant", result?.toString()?.trim() ?: "AI เงียบไป...")
+                setPrompt?.invoke(currentCtx, prompt)
+
+                val params = mapOf(
+                    "n_predict" to 256,
+                    "temperature" to 0.7,
+                    "top_p" to 0.9,
+                    "top_k" to 40,
+                    "repeat_penalty" to 1.1
+                )
+
+                val result = completion?.invoke(currentCtx, 256, params)?.toString() ?: ""
+
+                // 🔥 Streaming Simulation (จำลองการพิมพ์ทีละนิดให้ดู Pro)
+                var partial = ""
+                result.split(" ").forEach { word ->
+                    partial += "$word "
+                    _chatState.value = ChatUiState.Generating(partial)
+                    delay(50) // ความเร็วในการพิมพ์
+                }
+
+                _messages.value = _messages.value + ChatMessage("assistant", partial.trim())
             } catch (e: Exception) {
-                _messages.value = _messages.value + ChatMessage("assistant", "Error: ${e.cause ?: e.message}")
+                _messages.value = _messages.value + ChatMessage("assistant", "Error: ${e.cause?.message ?: e.message}")
             }
             _chatState.value = ChatUiState.Idle
         }
+    }
+
+    fun stopGeneration() {
+        generationJob?.cancel()
+        _chatState.value = ChatUiState.Idle
     }
 }
