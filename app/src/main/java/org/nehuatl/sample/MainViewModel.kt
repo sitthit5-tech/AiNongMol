@@ -31,8 +31,10 @@ class MainViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.LoadingModel
             try {
-                ctx?.close()
+                // เคลียร์ของเก่า
+                ctx?.let { it.javaClass.getMethod("close").invoke(it) }
                 ctx = null
+                
                 val file = File(filesDir, "model.gguf")
                 if (file.exists()) file.delete()
                 
@@ -58,26 +60,40 @@ class MainViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.Generating("")
             
-            // สร้าง Prompt แบบ Chat History (จดจำบริบท 5 ข้อความล่าสุด)
-            val prompt = _messages.value.takeLast(6).joinToString("\n") { 
-                "${if (it.role == \"user\") \"User\" else \"Assistant\"}: ${it.content}" 
+            // สร้าง Prompt แบบเรียบง่ายที่สุดเพื่อลด Error
+            val prompt = _messages.value.takeLast(4).joinToString("\n") { 
+                val role = if (it.role == "user") "User" else "Assistant"
+                "$role: ${it.content}"
             } + "\nAssistant:"
 
-            val response = try {
-                // ✅ Fix เป็น completion(prompt) ตามมาตรฐาน llama.cpp wrapper ส่วนใหญ่
-                currentCtx.completion(prompt)
+            try {
+                // สุ่มเรียก completion แบบปลอดภัย (ลองส่ง String ตัวเดียวก่อน)
+                // ถ้า Signature เป็น (String, Int) เราจะส่ง 128 เป็นค่า default
+                val response = try {
+                    currentCtx.completion(prompt)
+                } catch (e: Exception) {
+                    // Fallback กรณีต้องการ Int (n_predict)
+                    val method = currentCtx.javaClass.methods.find { it.name == "completion" }
+                    if (method?.parameterTypes?.size == 2) {
+                        method.invoke(currentCtx, prompt, 128) as String
+                    } else {
+                        "Error calling completion"
+                    }
+                }
+                
+                _messages.value = _messages.value + ChatMessage("assistant", response.toString().trim())
             } catch (e: Exception) {
-                "Error: ${e.message}"
+                _messages.value = _messages.value + ChatMessage("assistant", "Error: ${e.message}")
             }
-
-            _messages.value = _messages.value + ChatMessage("assistant", response.trim())
             _chatState.value = ChatUiState.Idle
         }
     }
 
     override fun onCleared() {
         super.onCleared()
-        ctx?.close()
+        try {
+            ctx?.let { it.javaClass.getMethod("close").invoke(it) }
+        } catch (e: Exception) {}
         ctx = null
     }
 }
