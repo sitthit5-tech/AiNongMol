@@ -24,18 +24,25 @@ class MainViewModel(private val contentResolver: ContentResolver) : ViewModel() 
     val modelName: StateFlow<String> = _modelName.asStateFlow()
 
     private var llamaContext: LLamaContext? = null
+    private var currentModelFile: File? = null // 📂 ไว้ลบไฟล์เก่ากัน Storage บวม
+    
     private val systemPrompt = "คุณคือ 'น้องมล' AI ภาษาไทยที่ฉลาด ตอบสั้น สุภาพ แทนตัวว่าน้องมล และเรียกผู้ใช้ว่าพี่"
 
     fun setModel(uriString: String, name: String) {
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.LoadingModel
             try {
+                // 🧹 ลบไฟล์โมเดลเก่าก่อนโหลดใหม่
+                currentModelFile?.delete()
+                
                 val uri = Uri.parse(uriString)
                 val tempFile = File.createTempFile("model_", ".gguf")
                 contentResolver.openInputStream(uri)?.use { input ->
                     FileOutputStream(tempFile).use { output -> input.copyTo(output) }
                 }
+                
                 llamaContext = LLamaContext(tempFile.absolutePath)
+                currentModelFile = tempFile // เก็บ reference ไว้ลบครั้งหน้า
                 _modelName.value = name
                 _chatState.value = ChatUiState.Idle
             } catch (e: Exception) { _chatState.value = ChatUiState.Idle }
@@ -43,7 +50,6 @@ class MainViewModel(private val contentResolver: ContentResolver) : ViewModel() 
     }
 
     private fun buildPrompt(): String {
-        // 🎯 ขยับเป็น 8 ข้อความเพื่อความฉลาดต่อเนื่อง
         val history = _messages.value.takeLast(8)
         val sb = StringBuilder()
         sb.append("<|im_start|>system\n$systemPrompt<|im_end|>\n")
@@ -55,11 +61,16 @@ class MainViewModel(private val contentResolver: ContentResolver) : ViewModel() 
     }
 
     fun sendPrompt(userText: String) {
-        // 🚫 1. กัน Spam: ถ้ากำลังคิดอยู่ ไม่ให้ส่งซ้ำ
         if (_chatState.value is ChatUiState.Generating) return
-        val ctx = llamaContext ?: return
+        
+        // 🛑 1. กันโมเดลว่าง: แจ้งเตือน User ทันทีถ้ายังไม่เลือกโมเดล
+        if (llamaContext == null) {
+            val msgs = _messages.value.toMutableList()
+            msgs.add(ChatMessage("assistant", "กรุณาเลือกโมเดลก่อนนะคะพี่ น้องมลยังไม่พร้อมคุยค่ะ ✨"))
+            _messages.value = msgs
+            return
+        }
 
-        // 🛡️ 2. ปลอดภัยจาก Race Condition: เพิ่ม User Message และ Update State ทันที
         val userMsgs = _messages.value.toMutableList()
         userMsgs.add(ChatMessage("user", userText))
         _messages.value = userMsgs
@@ -68,27 +79,33 @@ class MainViewModel(private val contentResolver: ContentResolver) : ViewModel() 
             _chatState.value = ChatUiState.Generating("")
             val prompt = buildPrompt()
             var response = ""
+            var tokenCount = 0 // 🛑 2. Hard Stop Token
+
             try {
-                ctx.sendPrompt(prompt, temperature = 0.5f, topP = 0.9f, repeatPenalty = 1.2f, maxTokens = 256)
+                val ctx = llamaContext!!
+                ctx.sendPrompt(prompt, temperature = 0.5f, topP = 0.9f, repeatPenalty = 1.2f, maxTokens = 300)
+                
                 for (token in ctx.getTokens()) {
+                    tokenCount++
+                    // 🛡️ กันโมเดลรั่ว หรือตอบยาวเกินความจำเป็น
+                    if (tokenCount > 300) break
                     if (token.contains("<|im_end|>") || token.contains("<|endoftext|>")) break
+                    
                     response += token
                     _chatState.value = ChatUiState.Generating(response)
                 }
             } catch (e: Exception) { response = "น้องมลมีปัญหาค่ะพี่" }
             
-            // ✨ ขัดเกลาข้อความ: ตัด Tag, Trim และจัดการบรรทัดว่าง
-            val finalResponse = response.replace(Regex("<\\|.*?\\|>"), "")
+            // ✨ 3. Bonus: ขัดเกลาช่องว่างหัวประโยคและบรรทัดว่าง
+            val safeResponse = response.replace(Regex("<\\|.*?\\|>"), "")
+                .replace(Regex("^\\s+"), "") // ตัดช่องว่างหัวประโยค
                 .replace(Regex("\n{3,}"), "\n\n")
                 .trim()
-            
-            val safeResponse = if (finalResponse.isBlank()) "น้องมลยังตอบไม่ได้ค่ะพี่" else finalResponse
+                .ifBlank { "น้องมลยังตอบไม่ได้ค่ะพี่" }
 
-            // 🛡️ 3. ปลอดภัยจาก Race Condition: ดึง State ล่าสุดมาเพิ่ม Assistant Message
             val assistantMsgs = _messages.value.toMutableList()
             assistantMsgs.add(ChatMessage("assistant", safeResponse))
             _messages.value = assistantMsgs
-            
             _chatState.value = ChatUiState.Idle
         }
     }
