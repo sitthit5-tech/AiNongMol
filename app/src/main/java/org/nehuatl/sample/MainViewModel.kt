@@ -1,90 +1,128 @@
 package org.nehuatl.sample
 
 import android.content.ContentResolver
-import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.io.File
-import java.io.FileOutputStream
+import org.nehuatl.llamacpp.LlamaHelper
 
-class MainViewModel(
-    private val contentResolver: ContentResolver,
-    private val filesDir: File
-) : ViewModel() {
+class MainViewModel(val contentResolver: ContentResolver): ViewModel() {
 
-    private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
-    val messages: StateFlow<List<ChatMessage>> = _messages
+    private val viewModelJob = SupervisorJob()
+    private val scope = CoroutineScope(Dispatchers.IO + viewModelJob)
 
-    private val _chatState = MutableStateFlow<ChatUiState>(ChatUiState.Idle)
-    val chatState: StateFlow<ChatUiState> = _chatState
+    private val _llmFlow = MutableSharedFlow<LlamaHelper.LLMEvent>(
+        replay = 0,
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val llmFlow: SharedFlow<LlamaHelper.LLMEvent> = _llmFlow.asSharedFlow()
+    private val _state = MutableStateFlow<GenerationState>(GenerationState.Idle)
+    val state = _state.asStateFlow()
+    private val _generatedText = MutableStateFlow("")
+    val generatedText = _generatedText.asStateFlow()
 
-    private val _modelName = MutableStateFlow("รอโหลดโมเดล...")
-    val modelName: StateFlow<String> = _modelName
+    private val llamaHelper by lazy {
+        LlamaHelper(
+            contentResolver = contentResolver,
+            scope = scope,
+            sharedFlow = _llmFlow,
+        )
+    }
 
-    private var ctx: Any? = null
+    fun loadModel(path: String) {
+        if (_state.value is GenerationState.Generating) {
+            Log.w("MainViewModel", "Cannot load model while generating")
+            return
+        }
+        _state.value = GenerationState.LoadingModel
+        try {
+            llamaHelper.load(path = path, contextLength = 2048) {
+                Log.i("MainViewModel", "Model loaded successfully")
+                _state.value = GenerationState.ModelLoaded(path)
+            }
+        } catch (e: Exception) {
+            _state.value = GenerationState.Error("Failed to load model: ${e.message}", e)
+            Log.e(">>> ERR ", "Model load failed", e)
+        }
+    }
 
-    fun setModel(uriString: String, name: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            _chatState.value = ChatUiState.LoadingModel
-            try {
-                val file = File(filesDir, "model.gguf")
-                contentResolver.openInputStream(Uri.parse(uriString))?.use { input ->
-                    FileOutputStream(file).use { output -> input.copyTo(output) }
-                }
+    fun generate(prompt: String) {
+        if (!_state.value.canGenerate()) {
+            Log.w("MainViewModel", "Cannot generate in current state: ${_state.value}")
+            return
+        }
 
-                // 🔑 ใช้กุญแจที่เราสแกนเจอ (LlamaContext)
-                val clazz = Class.forName("org.nehuatl.llamacpp.LlamaContext")
-                
-                // ลองสร้างด้วยท่าสร้าง (Factory) หรือ Constructor
-                ctx = try {
-                    val create = clazz.methods.firstOrNull { it.name == "create" || it.name == "load" }
-                    create?.invoke(null, file.absolutePath) ?: clazz.getConstructor(String::class.java).newInstance(file.absolutePath)
-                } catch (e: Exception) {
-                    clazz.getConstructor().newInstance().also { instance ->
-                        clazz.methods.firstOrNull { it.name == "load" }?.invoke(instance, file.absolutePath)
+        scope.launch {
+            llamaHelper.predict("คุณคือ น้องมล AI ผู้ช่วยอัจฉริยะ ตอบเป็นภาษาไทยอย่างสุภาพ " + prompt)
+            llmFlow.collect { event ->
+                when (event) {
+                    is LlamaHelper.LLMEvent.Started -> {
+                        _state.value = GenerationState.Generating(
+                            prompt = prompt,
+                            startTime = System.currentTimeMillis()
+                        )
+                        _generatedText.value = ""
+                        Log.i("MainViewModel", "Generation started")
                     }
-                }
+                    is LlamaHelper.LLMEvent.Ongoing -> {
+                        _generatedText.value += event.word
+                        val currentState = _state.value
+                        if (currentState is GenerationState.Generating) {
+                            _state.value = currentState.copy(tokensGenerated = event.tokenCount)
+                        }
+                    }
+                    is LlamaHelper.LLMEvent.Done -> {
+                        _state.value = GenerationState.Completed(
+                            prompt = prompt,
+                            tokenCount = event.tokenCount,
+                            durationMs = event.duration
+                        )
+                        Log.i("MainViewModel", "Generation completed")
+                        llamaHelper.stopPrediction()
+                    }
+                    is LlamaHelper.LLMEvent.Error -> {
+                        _state.value = GenerationState.Error("Generation interrupted")
+                        Log.e("MainViewModel", "Generation interrupted ${event.message}")
+                        llamaHelper.stopPrediction()
+                    }
 
-                _modelName.value = name
-                _chatState.value = ChatUiState.Idle
-            } catch (e: Exception) {
-                _modelName.value = "❌ โหลดไม่เข้า: ${e.cause?.message ?: e.message}"
-                _chatState.value = ChatUiState.Error(e.message ?: "Load Fail")
+                    else -> {}
+                }
             }
         }
     }
 
-    fun sendPrompt(text: String) {
-        val currentCtx = ctx ?: return
-        if (_chatState.value is ChatUiState.Generating) return
+    fun abort() {
+        if (_state.value.isActive()) {
+            Log.i("MainViewModel", "Aborting generation")
+            llamaHelper.abort()
 
-        _messages.value = _messages.value + ChatMessage("user", text)
-
-        viewModelScope.launch(Dispatchers.IO) {
-            _chatState.value = ChatUiState.Generating("")
-            try {
-                // 🗣️ หา Method สำหรับตอบคำถาม
-                val methods = currentCtx.javaClass.methods
-                val completion = methods.firstOrNull { it.name == "completion" || it.name == "generate" }
-                
-                // ส่งคำถามเข้าไป (รองรับทั้งแบบ String และ Map)
-                val response = if (completion?.parameterTypes?.size == 1) {
-                    completion.invoke(currentCtx, text)
-                } else {
-                    completion?.invoke(currentCtx, text, mapOf("n_predict" to 128))
-                }
-
-                val finalMessage = response?.toString()?.trim() ?: "AI ไม่ตอบกลับ"
-                _messages.value = _messages.value + ChatMessage("assistant", finalMessage)
-            } catch (e: Exception) {
-                _messages.value = _messages.value + ChatMessage("assistant", "❌ เกิดข้อผิดพลาด: ${e.cause?.message ?: e.message}")
+            val currentState = _state.value
+            if (currentState is GenerationState.Generating) {
+                val duration = System.currentTimeMillis() - currentState.startTime
+                _state.value = GenerationState.Completed(
+                    prompt = currentState.prompt,
+                    tokenCount = currentState.tokensGenerated,
+                    durationMs = duration
+                )
             }
-            _chatState.value = ChatUiState.Idle
         }
     }
 
-    fun stopGeneration() { _chatState.value = ChatUiState.Idle }
+    override fun onCleared() {
+        super.onCleared()
+        llamaHelper.abort()
+        llamaHelper.release()
+        viewModelJob.cancel()
+    }
 }
