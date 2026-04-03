@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import org.nehuatl.llamacpp.LLamaContext
+import org.nehuatl.llamacpp.LlamaContext
 import java.io.File
 import java.io.FileOutputStream
 
@@ -26,7 +26,7 @@ class MainViewModel(
     private val _modelName = MutableStateFlow("")
     val modelName: StateFlow<String> = _modelName.asStateFlow()
 
-    private var llamaContext: LLamaContext? = null
+    private var llamaContext: LlamaContext? = null
     private var currentModelFile: File? = null
 
     fun setModel(uriString: String, name: String) {
@@ -46,7 +46,7 @@ class MainViewModel(
                     }
                 }
                 
-                val ctx = LLamaContext(internalFile.absolutePath)
+                val ctx = LlamaContext(internalFile.absolutePath)
                 llamaContext = ctx
                 currentModelFile = internalFile
                 _modelName.value = name
