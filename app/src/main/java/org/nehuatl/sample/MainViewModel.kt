@@ -1,128 +1,92 @@
 package org.nehuatl.sample
 
 import android.content.ContentResolver
-import android.util.Log
+import android.net.Uri
 import androidx.lifecycle.ViewModel
-import kotlinx.coroutines.CoroutineScope
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import org.nehuatl.llamacpp.LlamaHelper
+import java.io.File
+import java.io.FileOutputStream
+import org.nehuatl.llamacpp.LlamaContext
 
-class MainViewModel(val contentResolver: ContentResolver): ViewModel() {
+class MainViewModel(
+    private val contentResolver: ContentResolver,
+    private val filesDir: File
+) : ViewModel() {
 
-    private val viewModelJob = SupervisorJob()
-    private val scope = CoroutineScope(Dispatchers.IO + viewModelJob)
+    private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
+    val messages: StateFlow<List<ChatMessage>> = _messages
 
-    private val _llmFlow = MutableSharedFlow<LlamaHelper.LLMEvent>(
-        replay = 0,
-        extraBufferCapacity = 64,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST
-    )
-    val llmFlow: SharedFlow<LlamaHelper.LLMEvent> = _llmFlow.asSharedFlow()
-    private val _state = MutableStateFlow<GenerationState>(GenerationState.Idle)
-    val state = _state.asStateFlow()
-    private val _generatedText = MutableStateFlow("")
-    val generatedText = _generatedText.asStateFlow()
+    private val _chatState = MutableStateFlow<ChatUiState>(ChatUiState.Idle)
+    val chatState: StateFlow<ChatUiState> = _chatState
 
-    private val llamaHelper by lazy {
-        LlamaHelper(
-            contentResolver = contentResolver,
-            scope = scope,
-            sharedFlow = _llmFlow,
-        )
-    }
+    private val _modelName = MutableStateFlow("พร้อมใช้งาน")
+    val modelName: StateFlow<String> = _modelName
 
-    fun loadModel(path: String) {
-        if (_state.value is GenerationState.Generating) {
-            Log.w("MainViewModel", "Cannot load model while generating")
-            return
-        }
-        _state.value = GenerationState.LoadingModel
-        try {
-            llamaHelper.load(path = path, contextLength = 2048) {
-                Log.i("MainViewModel", "Model loaded successfully")
-                _state.value = GenerationState.ModelLoaded(path)
-            }
-        } catch (e: Exception) {
-            _state.value = GenerationState.Error("Failed to load model: ${e.message}", e)
-            Log.e(">>> ERR ", "Model load failed", e)
-        }
-    }
+    private var ctx: LlamaContext? = null
 
-    fun generate(prompt: String) {
-        if (!_state.value.canGenerate()) {
-            Log.w("MainViewModel", "Cannot generate in current state: ${_state.value}")
-            return
-        }
-
-        scope.launch {
-            llamaHelper.predict("คุณคือ น้องมล AI ผู้ช่วยอัจฉริยะ ตอบเป็นภาษาไทยอย่างสุภาพ " + prompt)
-            llmFlow.collect { event ->
-                when (event) {
-                    is LlamaHelper.LLMEvent.Started -> {
-                        _state.value = GenerationState.Generating(
-                            prompt = prompt,
-                            startTime = System.currentTimeMillis()
-                        )
-                        _generatedText.value = ""
-                        Log.i("MainViewModel", "Generation started")
-                    }
-                    is LlamaHelper.LLMEvent.Ongoing -> {
-                        _generatedText.value += event.word
-                        val currentState = _state.value
-                        if (currentState is GenerationState.Generating) {
-                            _state.value = currentState.copy(tokensGenerated = event.tokenCount)
-                        }
-                    }
-                    is LlamaHelper.LLMEvent.Done -> {
-                        _state.value = GenerationState.Completed(
-                            prompt = prompt,
-                            tokenCount = event.tokenCount,
-                            durationMs = event.duration
-                        )
-                        Log.i("MainViewModel", "Generation completed")
-                        llamaHelper.stopPrediction()
-                    }
-                    is LlamaHelper.LLMEvent.Error -> {
-                        _state.value = GenerationState.Error("Generation interrupted")
-                        Log.e("MainViewModel", "Generation interrupted ${event.message}")
-                        llamaHelper.stopPrediction()
-                    }
-
-                    else -> {}
+    fun setModel(uriString: String, name: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _chatState.value = ChatUiState.LoadingModel
+            try {
+                val file = File(filesDir, "model.gguf")
+                contentResolver.openInputStream(Uri.parse(uriString))?.use { input ->
+                    FileOutputStream(file).use { output -> input.copyTo(output) }
                 }
+
+                // ✅ Production Constructor Fallback
+                ctx = try {
+                    LlamaContext(file.absolutePath, 2048)
+                } catch (e: Throwable) {
+                    LlamaContext(file.absolutePath)
+                }
+
+                _modelName.value = name
+                _chatState.value = ChatUiState.Idle
+            } catch (e: Exception) {
+                _modelName.value = "❌ โหลดไม่สำเร็จ"
+                _chatState.value = ChatUiState.Error(e.message ?: "Load Fail")
             }
         }
     }
 
-    fun abort() {
-        if (_state.value.isActive()) {
-            Log.i("MainViewModel", "Aborting generation")
-            llamaHelper.abort()
+    fun sendPrompt(text: String) {
+        val currentCtx = ctx ?: return
+        if (_chatState.value is ChatUiState.Generating) return
 
-            val currentState = _state.value
-            if (currentState is GenerationState.Generating) {
-                val duration = System.currentTimeMillis() - currentState.startTime
-                _state.value = GenerationState.Completed(
-                    prompt = currentState.prompt,
-                    tokenCount = currentState.tokensGenerated,
-                    durationMs = duration
+        _messages.value = _messages.value + ChatMessage("user", text)
+
+        viewModelScope.launch(Dispatchers.IO) {
+            _chatState.value = ChatUiState.Generating("")
+            try {
+                // 🔥 ท่าส่ง Prompt เข้า Params ตรงๆ ตามที่พี่แนะนำ (นิ่งที่สุด)
+                val response = currentCtx.completion(
+                    128,
+                    mapOf(
+                        "prompt" to text,
+                        "temp" to 0.7,
+                        "n_predict" to 128
+                    )
+                )
+
+                _messages.value = _messages.value + ChatMessage(
+                    "assistant",
+                    response.toString().trim()
+                )
+
+            } catch (e: Exception) {
+                _messages.value = _messages.value + ChatMessage(
+                    "assistant",
+                    "Error: ${e.message}"
                 )
             }
+            _chatState.value = ChatUiState.Idle
         }
     }
 
-    override fun onCleared() {
-        super.onCleared()
-        llamaHelper.abort()
-        llamaHelper.release()
-        viewModelJob.cancel()
+    fun stopGeneration() {
+        _chatState.value = ChatUiState.Idle
     }
 }
