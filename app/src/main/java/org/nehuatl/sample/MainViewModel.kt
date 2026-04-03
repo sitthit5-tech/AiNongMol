@@ -21,7 +21,7 @@ class MainViewModel(
     private val _chatState = MutableStateFlow<ChatUiState>(ChatUiState.Idle)
     val chatState: StateFlow<ChatUiState> = _chatState
 
-    private val _modelName = MutableStateFlow("กำลังเตรียมกุญแจ...")
+    private val _modelName = MutableStateFlow("รอโหลดโมเดล...")
     val modelName: StateFlow<String> = _modelName
 
     private var ctx: Any? = null
@@ -35,54 +35,52 @@ class MainViewModel(
                     FileOutputStream(file).use { output -> input.copyTo(output) }
                 }
 
-                val clazz = listOf("org.nehuatl.llamacpp.LlamaContext", "org.nehuatl.llamacpp.LLamaContext")
-                    .firstNotNullOfOrNull { try { Class.forName(it) } catch (e: Exception) { null } }
-                    ?: throw Exception("Library not found")
-
-                // 🔑 พยายามสร้าง Object ด้วย 3 ท่ามาตรฐาน
+                // 🔑 ใช้กุญแจที่เราสแกนเจอ (LlamaContext)
+                val clazz = Class.forName("org.nehuatl.llamacpp.LlamaContext")
+                
+                // ลองสร้างด้วยท่าสร้าง (Factory) หรือ Constructor
                 ctx = try {
-                    // ท่าที่ 1: Static Create (พบมากที่สุด)
-                    val createMethod = clazz.methods.firstOrNull { it.name == "create" && it.parameterTypes.size == 1 }
-                    createMethod?.invoke(null, file.absolutePath)
+                    val create = clazz.methods.firstOrNull { it.name == "create" || it.name == "load" }
+                    create?.invoke(null, file.absolutePath) ?: clazz.getConstructor(String::class.java).newInstance(file.absolutePath)
                 } catch (e: Exception) {
-                    try {
-                        // ท่าที่ 2: Static Load
-                        val loadMethod = clazz.methods.firstOrNull { it.name == "load" && it.parameterTypes.size == 1 }
-                        loadMethod?.invoke(null, file.absolutePath)
-                    } catch (e: Exception) {
-                        // ท่าที่ 3: Constructor รับ String (ถ้ามี)
-                        clazz.getConstructor(String::class.java).newInstance(file.absolutePath)
+                    clazz.getConstructor().newInstance().also { instance ->
+                        clazz.methods.firstOrNull { it.name == "load" }?.invoke(instance, file.absolutePath)
                     }
                 }
-
-                if (ctx == null) throw Exception("ไม่พบช่องทางสร้าง Context")
 
                 _modelName.value = name
                 _chatState.value = ChatUiState.Idle
             } catch (e: Exception) {
-                val err = e.cause?.message ?: e.message
-                _modelName.value = "❌ กุญแจผิดดอก: $err"
-                _chatState.value = ChatUiState.Error(err ?: "Unknown")
+                _modelName.value = "❌ โหลดไม่เข้า: ${e.cause?.message ?: e.message}"
+                _chatState.value = ChatUiState.Error(e.message ?: "Load Fail")
             }
         }
     }
 
     fun sendPrompt(text: String) {
         val currentCtx = ctx ?: return
+        if (_chatState.value is ChatUiState.Generating) return
+
         _messages.value = _messages.value + ChatMessage("user", text)
-        
+
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.Generating("")
             try {
-                // หา Method สำหรับคุย (มักชื่อ completion หรือ generate)
-                val method = currentCtx.javaClass.methods.firstOrNull { 
-                    it.name == "completion" || it.name == "generate" 
-                }
+                // 🗣️ หา Method สำหรับตอบคำถาม
+                val methods = currentCtx.javaClass.methods
+                val completion = methods.firstOrNull { it.name == "completion" || it.name == "generate" }
                 
-                val result = method?.invoke(currentCtx, text, mapOf("n_predict" to 64))
-                _messages.value = _messages.value + ChatMessage("assistant", result?.toString()?.trim() ?: "...")
+                // ส่งคำถามเข้าไป (รองรับทั้งแบบ String และ Map)
+                val response = if (completion?.parameterTypes?.size == 1) {
+                    completion.invoke(currentCtx, text)
+                } else {
+                    completion?.invoke(currentCtx, text, mapOf("n_predict" to 128))
+                }
+
+                val finalMessage = response?.toString()?.trim() ?: "AI ไม่ตอบกลับ"
+                _messages.value = _messages.value + ChatMessage("assistant", finalMessage)
             } catch (e: Exception) {
-                _messages.value = _messages.value + ChatMessage("assistant", "Error: ${e.message}")
+                _messages.value = _messages.value + ChatMessage("assistant", "❌ เกิดข้อผิดพลาด: ${e.cause?.message ?: e.message}")
             }
             _chatState.value = ChatUiState.Idle
         }
