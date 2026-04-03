@@ -2,6 +2,7 @@ package org.nehuatl.sample
 
 import android.content.ContentResolver
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -21,7 +22,7 @@ class MainViewModel(
     private val _chatState = MutableStateFlow<ChatUiState>(ChatUiState.Idle)
     val chatState: StateFlow<ChatUiState> = _chatState
 
-    private val _modelName = MutableStateFlow("ยังไม่ได้โหลด")
+    private val _modelName = MutableStateFlow("สถานะ: รอโหลดโมเดล")
     val modelName: StateFlow<String> = _modelName
 
     private var ctx: Any? = null
@@ -29,18 +30,32 @@ class MainViewModel(
     fun setModel(uriString: String, name: String) {
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.LoadingModel
+            _modelName.value = "⏳ กำลังเตรียมไฟล์..."
+            
             try {
                 closeContext()
 
                 val file = File(filesDir, "model.gguf")
                 if (file.exists()) file.delete()
 
-                contentResolver.openInputStream(Uri.parse(uriString))?.use { input ->
+                // 🔍 1. เช็ค InputStream
+                val inputStream = contentResolver.openInputStream(Uri.parse(uriString)) 
+                    ?: throw Exception("เปิดไฟล์ไม่ได้ (Stream เป็น Null)")
+
+                _modelName.value = "📂 กำลัง Copy โมเดล..."
+                inputStream.use { input ->
                     FileOutputStream(file).use { output ->
                         input.copyTo(output)
                     }
                 }
 
+                // 🔍 2. เช็คขนาดไฟล์หลัง Copy
+                val fileSizeMB = file.length() / (1024 * 1024)
+                if (fileSizeMB == 0L) throw Exception("Copy ล้มเหลว (ไฟล์มีขนาด 0 Byte)")
+                
+                _modelName.value = "🧠 กำลัง Init โมเดล (" + fileSizeMB + "MB)..."
+
+                // 🔍 3. ลอง Init Class (ใช้ Reflection แบบชัวร์ๆ)
                 val classNames = listOf(
                     "org.nehuatl.llamacpp.LLamaContext",
                     "org.nehuatl.llamacpp.LlamaContext"
@@ -48,16 +63,19 @@ class MainViewModel(
 
                 val clazz = classNames.firstNotNullOfOrNull {
                     try { Class.forName(it) } catch (e: Exception) { null }
-                } ?: throw Exception("Context class not found")
+                } ?: throw Exception("ไม่พบ Lib llama.cpp ในเครื่อง")
 
                 val constructor = clazz.getConstructor(String::class.java)
                 ctx = constructor.newInstance(file.absolutePath)
 
-                _modelName.value = name
+                _modelName.value = "✅ พร้อมใช้งาน: " + name + " (" + fileSizeMB + "MB)"
                 _chatState.value = ChatUiState.Idle
 
             } catch (e: Exception) {
-                _chatState.value = ChatUiState.Error(e.message ?: "Load Fail")
+                val errorMsg = e.message ?: "Unknown Error"
+                Log.e("AiNongMol", "Error: " + errorMsg)
+                _modelName.value = "❌ พลาด: " + errorMsg
+                _chatState.value = ChatUiState.Error(errorMsg)
             }
         }
     }
@@ -70,44 +88,31 @@ class MainViewModel(
 
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.Generating("")
-
-            val history = _messages.value.takeLast(4)
-            val prompt = history.joinToString("\n") { msg ->
-                val role = if (msg.role == "user") "User" else "Assistant"
-                role + ": " + msg.content
+            
+            val prompt = _messages.value.takeLast(4).joinToString("\n") { 
+                val role = if (it.role == "user") "User" else "Assistant"
+                role + ": " + it.content
             } + "\nAssistant:"
 
             try {
-                val method = currentCtx.javaClass.methods.firstOrNull {
-                    it.name == "completion" || it.name == "sendPrompt"
+                val method = currentCtx.javaClass.methods.firstOrNull { 
+                    it.name == "completion" || it.name == "sendPrompt" 
                 }
 
-                val result: Any? = if (method != null) {
-                    val paramCount = method.parameterTypes.size
-                    when (paramCount) {
+                val result = if (method != null) {
+                    when (method.parameterTypes.size) {
                         1 -> method.invoke(currentCtx, prompt)
-                        2 -> {
-                            val type = method.parameterTypes[1]
-                            if (type == Int::class.javaPrimitiveType || type == Int::class.java) {
-                                method.invoke(currentCtx, prompt, 128)
-                            } else {
-                                method.invoke(currentCtx, prompt, emptyMap<String, Any>())
-                            }
-                        }
+                        2 -> method.invoke(currentCtx, prompt, 128)
                         else -> method.invoke(currentCtx, prompt)
                     }
-                } else {
-                    "No method found"
-                }
+                } else "ไม่พบ Method สำหรับประมวลผล"
 
-                val textResult = result?.toString()?.trim() ?: "ไม่มีคำตอบ"
-
+                val textResult = result?.toString()?.trim() ?: "ไม่มีคำตอบจากโมเดล"
                 _messages.value = _messages.value + ChatMessage("assistant", textResult)
 
             } catch (e: Exception) {
-                _messages.value = _messages.value + ChatMessage("assistant", "Error: " + (e.message ?: "unknown"))
+                _messages.value = _messages.value + ChatMessage("assistant", "Error: " + (e.message ?: "AI พัง"))
             }
-
             _chatState.value = ChatUiState.Idle
         }
     }
@@ -115,13 +120,12 @@ class MainViewModel(
     private fun closeContext() {
         try {
             ctx?.let {
-                val method = it.javaClass.methods.firstOrNull { m ->
-                    m.name == "close" || m.name == "release"
+                val method = it.javaClass.methods.firstOrNull { m -> 
+                    m.name == "close" || m.name == "release" 
                 }
                 method?.invoke(it)
             }
-        } catch (_: Exception) {
-        }
+        } catch (e: Exception) {}
         ctx = null
     }
 
