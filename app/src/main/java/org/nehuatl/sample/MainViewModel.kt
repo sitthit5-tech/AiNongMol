@@ -7,7 +7,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import org.nehuatl.llamacpp.$REAL_CLASS_NAME
+import org.nehuatl.llamacpp.LlamaContext
 import java.io.File
 import java.io.FileOutputStream
 
@@ -25,20 +25,21 @@ class MainViewModel(
     private val _modelName = MutableStateFlow("รอโหลดโมเดล...")
     val modelName: StateFlow<String> = _modelName
 
-    private var ctx: $REAL_CLASS_NAME? = null
+    private var ctx: LlamaContext? = null
 
     fun setModel(uriString: String, name: String) {
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.LoadingModel
             try {
                 ctx = null 
+
                 val file = File(filesDir, "model.gguf")
                 contentResolver.openInputStream(Uri.parse(uriString))?.use { input ->
                     FileOutputStream(file).use { output -> input.copyTo(output) }
                 }
 
-                // เรียก Constructor ตามชื่อที่หาเจอจริง
-                ctx = $REAL_CLASS_NAME(file.absolutePath)
+                // ✅ ใช้ LlamaContext (L ตัวเดียว)
+                ctx = LlamaContext(file.absolutePath)
                 
                 _modelName.value = name
                 _chatState.value = ChatUiState.Idle
@@ -57,11 +58,9 @@ class MainViewModel(
 
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.Generating("")
-            val prompt = _messages.value.takeLast(4).joinToString("\n") { it.role + ": " + it.content } + "\nAssistant:"
-
+            
             try {
-                // พยายามเรียก Method ที่รับ String ถ้าหาเจอ
-                // ถ้าหาไม่เจอ จะใช้การบวก String หลอกๆ ไปก่อนเพื่อให้ผ่าน Compile
+                // ✅ ใช้ completion(Int) ตามที่ CI เคยแจ้งว่าต้องการ Int
                 val response = currentCtx.completion(128) 
 
                 _messages.value = _messages.value + ChatMessage("assistant", response.trim())
