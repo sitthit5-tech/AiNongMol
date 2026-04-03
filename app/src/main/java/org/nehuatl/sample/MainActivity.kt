@@ -18,12 +18,18 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // ✅ ส่งทั้ง contentResolver และ filesDir เข้าไป
-        viewModel = ViewModelProvider(this, object : ViewModelProvider.Factory {
-            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-                return MainViewModel(contentResolver, filesDir) as T
+        // ✅ ปรับ Factory ให้รองรับ Type Checking แบบที่ Gradle ชอบ
+        val factory = object : ViewModelProvider.Factory {
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                if (modelClass.isAssignableFrom(MainViewModel::class.java)) {
+                    @Suppress("UNCHECKED_CAST")
+                    return MainViewModel(contentResolver, filesDir) as T
+                }
+                throw IllegalArgumentException("Unknown ViewModel class")
             }
-        })[MainViewModel::class.java]
+        }
+        
+        viewModel = ViewModelProvider(this, factory)[MainViewModel::class.java]
 
         setContent {
             ChatScreen(

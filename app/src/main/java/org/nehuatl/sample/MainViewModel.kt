@@ -15,7 +15,7 @@ import java.io.FileOutputStream
 
 class MainViewModel(
     private val contentResolver: ContentResolver,
-    private val filesDir: File // ✅ รับ filesDir จาก Android Context โดยตรง
+    private val filesDir: File
 ) : ViewModel() {
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
@@ -33,12 +33,11 @@ class MainViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.LoadingModel
             try {
-                // 🧹 ล้างของเก่าแบบสะอาดหมดจด
                 llamaContext = null
                 currentModelFile?.delete()
                 
                 val uri = Uri.parse(uriString)
-                // 📂 ใช้ filesDir ที่แน่นอนที่สุดสำหรับ Native Reading
+                // ✅ ใช้ filesDir ที่ส่งมาจาก MainActivity ชัวร์ที่สุด
                 val internalFile = File(filesDir, "active_model.gguf")
                 
                 contentResolver.openInputStream(uri)?.use { input ->
@@ -47,16 +46,14 @@ class MainViewModel(
                     }
                 }
                 
-                // 🧠 โหลดโมเดลจาก Path ที่การันตีว่าอ่านได้
                 val ctx = LLamaContext(internalFile.absolutePath)
                 llamaContext = ctx
                 currentModelFile = internalFile
-                
                 _modelName.value = name
                 _chatState.value = ChatUiState.Idle
             } catch (e: Exception) {
                 _chatState.value = ChatUiState.Idle
-                _modelName.value = "โหลดพลาด: ${e.message}"
+                _modelName.value = "Error: ${e.message}"
             }
         }
     }
@@ -74,7 +71,6 @@ class MainViewModel(
             val prompt = "User: $userText\nAssistant:"
             var response = ""
             try {
-                // ⚡ รัน Inference จริงแบบ Non-stream เพื่อความนิ่ง
                 response = ctx.sendPrompt(prompt, temperature = 0.7f, maxTokens = 256)
             } catch (e: Exception) {
                 response = "เกิดปัญหา: ${e.message}"
