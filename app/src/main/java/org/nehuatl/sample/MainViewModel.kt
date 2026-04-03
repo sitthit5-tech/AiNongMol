@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import org.nehuatl.llamacpp.$REAL_CLASS
 import java.io.File
 import java.io.FileOutputStream
 
@@ -22,60 +23,36 @@ class MainViewModel(
     private val _chatState = MutableStateFlow<ChatUiState>(ChatUiState.Idle)
     val chatState: StateFlow<ChatUiState> = _chatState
 
-    private val _modelName = MutableStateFlow("สถานะ: รอโหลดโมเดล")
+    private val _modelName = MutableStateFlow("รอโหลดโมเดล...")
     val modelName: StateFlow<String> = _modelName
 
-    private var ctx: Any? = null
+    private var ctx: $REAL_CLASS? = null
 
     fun setModel(uriString: String, name: String) {
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.LoadingModel
-            _modelName.value = "⏳ กำลังเตรียมไฟล์..."
-            
             try {
-                closeContext()
+                ctx?.close()
+                ctx = null
 
                 val file = File(filesDir, "model.gguf")
                 if (file.exists()) file.delete()
 
-                // 🔍 1. เช็ค InputStream
-                val inputStream = contentResolver.openInputStream(Uri.parse(uriString)) 
-                    ?: throw Exception("เปิดไฟล์ไม่ได้ (Stream เป็น Null)")
-
-                _modelName.value = "📂 กำลัง Copy โมเดล..."
-                inputStream.use { input ->
+                contentResolver.openInputStream(Uri.parse(uriString))?.use { input ->
                     FileOutputStream(file).use { output ->
                         input.copyTo(output)
                     }
                 }
 
-                // 🔍 2. เช็คขนาดไฟล์หลัง Copy
-                val fileSizeMB = file.length() / (1024 * 1024)
-                if (fileSizeMB == 0L) throw Exception("Copy ล้มเหลว (ไฟล์มีขนาด 0 Byte)")
+                // ✅ เรียก Constructor ตรงๆ ไม่ต้องใช้ Reflection
+                ctx = $REAL_CLASS(file.absolutePath)
                 
-                _modelName.value = "🧠 กำลัง Init โมเดล (" + fileSizeMB + "MB)..."
-
-                // 🔍 3. ลอง Init Class (ใช้ Reflection แบบชัวร์ๆ)
-                val classNames = listOf(
-                    "org.nehuatl.llamacpp.LLamaContext",
-                    "org.nehuatl.llamacpp.LlamaContext"
-                )
-
-                val clazz = classNames.firstNotNullOfOrNull {
-                    try { Class.forName(it) } catch (e: Exception) { null }
-                } ?: throw Exception("ไม่พบ Lib llama.cpp ในเครื่อง")
-
-                val constructor = clazz.getConstructor(String::class.java)
-                ctx = constructor.newInstance(file.absolutePath)
-
-                _modelName.value = "✅ พร้อมใช้งาน: " + name + " (" + fileSizeMB + "MB)"
+                _modelName.value = name
                 _chatState.value = ChatUiState.Idle
-
+                Log.d("AiNongMol", "Model Loaded: $name")
             } catch (e: Exception) {
-                val errorMsg = e.message ?: "Unknown Error"
-                Log.e("AiNongMol", "Error: " + errorMsg)
-                _modelName.value = "❌ พลาด: " + errorMsg
-                _chatState.value = ChatUiState.Error(errorMsg)
+                _modelName.value = "โหลดพลาด: " + e.message
+                _chatState.value = ChatUiState.Error(e.message ?: "Load Fail")
             }
         }
     }
@@ -90,47 +67,25 @@ class MainViewModel(
             _chatState.value = ChatUiState.Generating("")
             
             val prompt = _messages.value.takeLast(4).joinToString("\n") { 
-                val role = if (it.role == "user") "User" else "Assistant"
-                role + ": " + it.content
+                (if (it.role == "user") "User" else "Assistant") + ": " + it.content 
             } + "\nAssistant:"
 
             try {
-                val method = currentCtx.javaClass.methods.firstOrNull { 
-                    it.name == "completion" || it.name == "sendPrompt" 
-                }
+                // ✅ เรียก Method ตรงๆ (ผมใส่ Parameter ยอดนิยมไว้ให้ ถ้าติดแดงพี่บอกผมนะ)
+                // ส่วนใหญ่จะใช้ completion(prompt) หรือ completion(prompt, tokens)
+                val response = currentCtx.completion(prompt)
 
-                val result = if (method != null) {
-                    when (method.parameterTypes.size) {
-                        1 -> method.invoke(currentCtx, prompt)
-                        2 -> method.invoke(currentCtx, prompt, 128)
-                        else -> method.invoke(currentCtx, prompt)
-                    }
-                } else "ไม่พบ Method สำหรับประมวลผล"
-
-                val textResult = result?.toString()?.trim() ?: "ไม่มีคำตอบจากโมเดล"
-                _messages.value = _messages.value + ChatMessage("assistant", textResult)
-
+                _messages.value = _messages.value + ChatMessage("assistant", response.trim())
             } catch (e: Exception) {
-                _messages.value = _messages.value + ChatMessage("assistant", "Error: " + (e.message ?: "AI พัง"))
+                _messages.value = _messages.value + ChatMessage("assistant", "Error: " + e.message)
             }
             _chatState.value = ChatUiState.Idle
         }
     }
 
-    private fun closeContext() {
-        try {
-            ctx?.let {
-                val method = it.javaClass.methods.firstOrNull { m -> 
-                    m.name == "close" || m.name == "release" 
-                }
-                method?.invoke(it)
-            }
-        } catch (e: Exception) {}
-        ctx = null
-    }
-
     override fun onCleared() {
         super.onCleared()
-        closeContext()
+        ctx?.close()
+        ctx = null
     }
 }
