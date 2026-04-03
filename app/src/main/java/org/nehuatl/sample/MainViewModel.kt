@@ -24,7 +24,7 @@ class MainViewModel(
     private val _modelName = MutableStateFlow("ยังไม่ได้โหลด")
     val modelName: StateFlow<String> = _modelName
 
-    private var ctx: Any? = null // ใช้ Any เพื่อเลี่ยงการ Type Check ตอน compile
+    private var ctx: Any? = null
 
     fun setModel(uriString: String, name: String) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -39,7 +39,6 @@ class MainViewModel(
                     FileOutputStream(file).use { output -> input.copyTo(output) }
                 }
                 
-                // โหลด Class แบบ Dynamic
                 val clazz = Class.forName("org.nehuatl.llamacpp.LLamaContext")
                 val constructor = clazz.getConstructor(String::class.java)
                 ctx = constructor.newInstance(file.absolutePath)
@@ -62,17 +61,16 @@ class MainViewModel(
             _chatState.value = ChatUiState.Generating("")
             
             val prompt = _messages.value.takeLast(4).joinToString("\n") { 
-                "${if (it.role == \"user\") \"User\" else \"Assistant\"}: ${it.content}" 
+                val roleName = if (it.role == "user") "User" else "Assistant"
+                roleName + ": " + it.content
             } + "\nAssistant:"
 
             try {
-                // ✅ ใช้ Reflection เรียกฟังก์ชัน 100% เพื่อไม่ให้ Compiler มายุ่งกับเรา
                 val method = currentCtx.javaClass.methods.find { it.name == "completion" || it.name == "sendPrompt" }
                 
                 val result = when (method?.parameterTypes?.size) {
                     1 -> method.invoke(currentCtx, prompt)
                     2 -> {
-                        // ถ้า Lib ต้องการ 2 ตัว (String, Map หรือ String, Int)
                         if (method.parameterTypes[1] == Map::class.java) {
                             method.invoke(currentCtx, prompt, emptyMap<String, Any>())
                         } else {
@@ -82,9 +80,9 @@ class MainViewModel(
                     else -> method?.invoke(currentCtx, prompt)
                 }
 
-                _messages.value = _messages.value + ChatMessage("assistant", result?.toString()?.trim() ?: "ไม่มีคำตอบ")
+                _messages.value = _messages.value + ChatMessage("assistant", result?.toString()?.trim() ?: "No response")
             } catch (e: Exception) {
-                _messages.value = _messages.value + ChatMessage("assistant", "Error: ${e.message}")
+                _messages.value = _messages.value + ChatMessage("assistant", "Error: " + e.message)
             }
             _chatState.value = ChatUiState.Idle
         }
