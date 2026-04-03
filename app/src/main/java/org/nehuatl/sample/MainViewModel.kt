@@ -2,12 +2,12 @@ package org.nehuatl.sample
 
 import android.content.ContentResolver
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import org.nehuatl.llamacpp.LlamaContext
 import java.io.File
 import java.io.FileOutputStream
 
@@ -25,7 +25,7 @@ class MainViewModel(
     private val _modelName = MutableStateFlow("รอโหลดโมเดล...")
     val modelName: StateFlow<String> = _modelName
 
-    private var ctx: LlamaContext? = null
+    private var ctx: Any? = null
 
     fun setModel(uriString: String, name: String) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -37,13 +37,17 @@ class MainViewModel(
                     FileOutputStream(file).use { output -> input.copyTo(output) }
                 }
 
-                // เรียก Constructor (ส่ง Path)
-                ctx = LlamaContext(file.absolutePath)
+                // ค้นหา Class และสร้าง Instance (ใช้ท่า Safe Reflection)
+                val clazz = listOf("org.nehuatl.llamacpp.LlamaContext", "org.nehuatl.llamacpp.LLamaContext")
+                    .firstNotNullOfOrNull { try { Class.forName(it) } catch (e: Exception) { null } }
+                    ?: throw Exception("ไม่พบ Library AI")
+
+                ctx = clazz.getConstructor(String::class.java).newInstance(file.absolutePath)
                 
                 _modelName.value = name
                 _chatState.value = ChatUiState.Idle
             } catch (e: Exception) {
-                _modelName.value = "❌ " + (e.message ?: "Load Fail")
+                _modelName.value = "❌ โหลดพลาด: " + e.message
                 _chatState.value = ChatUiState.Error(e.message ?: "Load Fail")
             }
         }
@@ -57,23 +61,35 @@ class MainViewModel(
 
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.Generating("")
-            
+
+            val prompt = _messages.value.takeLast(4).joinToString("\n") {
+                val role = if (it.role == "user") "User" else "Assistant"
+                "$role: ${it.content}"
+            } + "\nAssistant:"
+
             try {
-                // ✅ แก้ตาม CI: ส่ง Map เข้าไป (จะใส่ค่าว่างหรือ Config ก็ได้)
-                val params = mapOf<String, Any>(
-                    "n_predict" to 128,
-                    "prompt" to text // ลองใส่ prompt ลงใน map เผื่อ lib รับทางนี้
-                )
+                // 🎯 จุดตาย: เรียก Method 'completion' ด้วย (String, Map)
+                val method = currentCtx.javaClass.methods.firstOrNull { it.name == "completion" }
                 
-                val result = currentCtx.completion(params) 
+                val params = mapOf(
+                    "n_predict" to 128,
+                    "temperature" to 0.7,
+                    "top_k" to 40,
+                    "top_p" to 0.9,
+                    "repeat_penalty" to 1.1
+                )
 
-                // ✅ แก้เรื่อง trim: แปลงเป็น String ก่อน แล้วค่อยจัดการ
-                val response = result?.toString() ?: "ไม่มีคำตอบ"
+                // เรียกใช้จริง: invoke(object, arg1, arg2)
+                val result = method?.invoke(currentCtx, prompt, params)
 
-                _messages.value = _messages.value + ChatMessage("assistant", response.trim())
+                val textResult = result?.toString()?.trim() ?: "ไม่มีคำตอบจาก AI"
+                _messages.value = _messages.value + ChatMessage("assistant", textResult)
+
             } catch (e: Exception) {
-                _messages.value = _messages.value + ChatMessage("assistant", "Error: " + (e.message ?: "AI Fail"))
+                val errorMsg = e.cause?.message ?: e.message ?: "Unknown Error"
+                _messages.value = _messages.value + ChatMessage("assistant", "Error: $errorMsg")
             }
+
             _chatState.value = ChatUiState.Idle
         }
     }
