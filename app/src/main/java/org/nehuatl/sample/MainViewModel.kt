@@ -31,20 +31,24 @@ class MainViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.LoadingModel
             try {
+                // ลบการเรียก close() ที่ไม่มีอยู่จริงออก
                 ctx = null 
 
                 val file = File(filesDir, "model.gguf")
                 contentResolver.openInputStream(Uri.parse(uriString))?.use { input ->
-                    FileOutputStream(file).use { output -> input.copyTo(output) }
+                    FileOutputStream(file).use { output ->
+                        input.copyTo(output)
+                    }
                 }
 
-                // ✅ ใช้ LlamaContext (L ตัวเดียว)
+                // เรียก Constructor ตามที่ Log เคยบอก (ส่ง Path ไป)
+                // ถ้าพังตรงนี้แสดงว่า Constructor ต้องการ Int เราจะรู้ทันที
                 ctx = LlamaContext(file.absolutePath)
                 
                 _modelName.value = name
                 _chatState.value = ChatUiState.Idle
             } catch (e: Exception) {
-                _modelName.value = "❌ " + (e.message ?: "Load Fail")
+                _modelName.value = "❌ โหลดพลาด: " + (e.message ?: "Error")
                 _chatState.value = ChatUiState.Error(e.message ?: "Load Fail")
             }
         }
@@ -60,7 +64,7 @@ class MainViewModel(
             _chatState.value = ChatUiState.Generating("")
             
             try {
-                // ✅ ใช้ completion(Int) ตามที่ CI เคยแจ้งว่าต้องการ Int
+                // เรียก completion(128) ตามที่ CI เคยแจ้งว่าต้องการ Int
                 val response = currentCtx.completion(128) 
 
                 _messages.value = _messages.value + ChatMessage("assistant", response.trim())
