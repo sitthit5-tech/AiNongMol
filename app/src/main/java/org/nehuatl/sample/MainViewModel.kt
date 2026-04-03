@@ -30,68 +30,73 @@ class MainViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.LoadingModel
             try {
-                ctx = null
                 val file = File(filesDir, "model.gguf")
                 contentResolver.openInputStream(Uri.parse(uriString))?.use { input ->
                     FileOutputStream(file).use { output -> input.copyTo(output) }
                 }
 
-                // 1. หา Class
+                // 🔍 หา Class (ลองทั้งสองแบบที่อาจเป็นไปได้)
                 val clazz = listOf("org.nehuatl.llamacpp.LlamaContext", "org.nehuatl.llamacpp.LLamaContext")
                     .firstNotNullOfOrNull { try { Class.forName(it) } catch (e: Exception) { null } }
                     ?: throw Exception("Library not found")
 
-                // 2. ⚡ ท่าไม้ตาย: หา Static Method สำหรับโหลด (มักจะรับ String)
-                val loadMethod = clazz.methods.firstOrNull { 
-                    java.lang.reflect.Modifier.isStatic(it.modifiers) && 
-                    it.parameterTypes.size == 1 && 
-                    it.parameterTypes[0] == String::class.java
-                }
-
-                if (loadMethod != null) {
-                    // ถ้าเจอ Method สำหรับโหลด ให้เรียกตัวนั้น
-                    ctx = loadMethod.invoke(null, file.absolutePath)
-                } else {
-                    // ถ้าไม่เจอจริงๆ ให้ลอง Constructor แบบ Default (ไม่มี Parameter) 
-                    // แล้วค่อยไปเซ็ต Path ทีหลัง
-                    ctx = clazz.getConstructor().newInstance()
-                    clazz.methods.firstOrNull { it.name.contains("load") || it.name.contains("Model") }
-                        ?.invoke(ctx, file.absolutePath)
+                // ⚡ ลองสร้าง Instance (ท่าที่ 1: Constructor รับ String)
+                ctx = try {
+                    clazz.getConstructor(String::class.java).newInstance(file.absolutePath)
+                } catch (e: Exception) {
+                    // ท่าที่ 2: Constructor ว่าง แล้วเรียก load
+                    val instance = clazz.getConstructor().newInstance()
+                    clazz.methods.firstOrNull { it.name.contains("load", ignoreCase = true) }
+                        ?.invoke(instance, file.absolutePath)
+                    instance
                 }
 
                 _modelName.value = name
                 _chatState.value = ChatUiState.Idle
             } catch (e: Exception) {
-                val realError = e.cause?.message ?: e.message
-                _modelName.value = "❌ พลาด: $realError"
-                _chatState.value = ChatUiState.Error(realError ?: "Unknown")
+                val msg = e.cause?.message ?: e.message
+                _modelName.value = "❌ โหลดไม่เข้า: $msg"
+                _chatState.value = ChatUiState.Error(msg ?: "Load Fail")
             }
         }
     }
 
     fun sendPrompt(text: String) {
         val currentCtx = ctx ?: return
+        if (_chatState.value is ChatUiState.Generating) return
+
+        _messages.value = _messages.value + ChatMessage("user", text)
+
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.Generating("")
             try {
-                // หา Method completion
-                val method = currentCtx.javaClass.methods.firstOrNull { it.name == "completion" }
-                val prompt = text + "\nAssistant:"
-                val params = mapOf("n_predict" to 128)
+                val methods = currentCtx.javaClass.methods
+                val completion = methods.firstOrNull { it.name == "completion" }
                 
-                // ลองเรียกแบบ (String, Map) หรือ (Map)
-                val result = if (method?.parameterTypes?.size == 2) {
-                    method.invoke(currentCtx, prompt, params)
+                // เตรียม Parameter (Map คือท่ามาตรฐาน)
+                val params = mapOf(
+                    "prompt" to text,
+                    "n_predict" to 128,
+                    "temperature" to 0.7
+                )
+
+                // เรียกใช้ (รองรับทั้งแบบส่ง Prompt แยก หรือส่งรวมใน Map)
+                val result = if (completion?.parameterTypes?.size == 2) {
+                    completion.invoke(currentCtx, text, params)
                 } else {
-                    method?.invoke(currentCtx, params)
+                    completion?.invoke(currentCtx, params)
                 }
 
-                _messages.value = _messages.value + ChatMessage("user", text)
-                _messages.value = _messages.value + ChatMessage("assistant", result?.toString()?.trim() ?: "...")
+                val response = result?.toString()?.trim() ?: "ไม่มีคำตอบ"
+                _messages.value = _messages.value + ChatMessage("assistant", response)
             } catch (e: Exception) {
-                _messages.value = _messages.value + ChatMessage("assistant", "Error: ${e.message}")
+                _messages.value = _messages.value + ChatMessage("assistant", "Error: ${e.cause?.message ?: e.message}")
             }
             _chatState.value = ChatUiState.Idle
         }
+    }
+
+    fun stopGeneration() {
+        _chatState.value = ChatUiState.Idle
     }
 }
