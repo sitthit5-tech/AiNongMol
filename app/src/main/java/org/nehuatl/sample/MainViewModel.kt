@@ -31,24 +31,19 @@ class MainViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.LoadingModel
             try {
-                // ลบการเรียก close() ที่ไม่มีอยู่จริงออก
                 ctx = null 
-
                 val file = File(filesDir, "model.gguf")
                 contentResolver.openInputStream(Uri.parse(uriString))?.use { input ->
-                    FileOutputStream(file).use { output ->
-                        input.copyTo(output)
-                    }
+                    FileOutputStream(file).use { output -> input.copyTo(output) }
                 }
 
-                // เรียก Constructor ตามที่ Log เคยบอก (ส่ง Path ไป)
-                // ถ้าพังตรงนี้แสดงว่า Constructor ต้องการ Int เราจะรู้ทันที
+                // เรียก Constructor (ส่ง Path)
                 ctx = LlamaContext(file.absolutePath)
                 
                 _modelName.value = name
                 _chatState.value = ChatUiState.Idle
             } catch (e: Exception) {
-                _modelName.value = "❌ โหลดพลาด: " + (e.message ?: "Error")
+                _modelName.value = "❌ " + (e.message ?: "Load Fail")
                 _chatState.value = ChatUiState.Error(e.message ?: "Load Fail")
             }
         }
@@ -64,8 +59,16 @@ class MainViewModel(
             _chatState.value = ChatUiState.Generating("")
             
             try {
-                // เรียก completion(128) ตามที่ CI เคยแจ้งว่าต้องการ Int
-                val response = currentCtx.completion(128) 
+                // ✅ แก้ตาม CI: ส่ง Map เข้าไป (จะใส่ค่าว่างหรือ Config ก็ได้)
+                val params = mapOf<String, Any>(
+                    "n_predict" to 128,
+                    "prompt" to text // ลองใส่ prompt ลงใน map เผื่อ lib รับทางนี้
+                )
+                
+                val result = currentCtx.completion(params) 
+
+                // ✅ แก้เรื่อง trim: แปลงเป็น String ก่อน แล้วค่อยจัดการ
+                val response = result?.toString() ?: "ไม่มีคำตอบ"
 
                 _messages.value = _messages.value + ChatMessage("assistant", response.trim())
             } catch (e: Exception) {
