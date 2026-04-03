@@ -31,20 +31,31 @@ class MainViewModel(
             _chatState.value = ChatUiState.LoadingModel
             try {
                 closeContext()
-                
+
                 val file = File(filesDir, "model.gguf")
                 if (file.exists()) file.delete()
-                
+
                 contentResolver.openInputStream(Uri.parse(uriString))?.use { input ->
-                    FileOutputStream(file).use { output -> input.copyTo(output) }
+                    FileOutputStream(file).use { output ->
+                        input.copyTo(output)
+                    }
                 }
-                
-                val clazz = Class.forName("org.nehuatl.llamacpp.LLamaContext")
+
+                val classNames = listOf(
+                    "org.nehuatl.llamacpp.LLamaContext",
+                    "org.nehuatl.llamacpp.LlamaContext"
+                )
+
+                val clazz = classNames.firstNotNullOfOrNull {
+                    try { Class.forName(it) } catch (e: Exception) { null }
+                } ?: throw Exception("Context class not found")
+
                 val constructor = clazz.getConstructor(String::class.java)
                 ctx = constructor.newInstance(file.absolutePath)
-                
+
                 _modelName.value = name
                 _chatState.value = ChatUiState.Idle
+
             } catch (e: Exception) {
                 _chatState.value = ChatUiState.Error(e.message ?: "Load Fail")
             }
@@ -59,42 +70,58 @@ class MainViewModel(
 
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.Generating("")
-            
-            val prompt = _messages.value.takeLast(4).joinToString("\n") { 
-                val roleName = if (it.role == "user") "User" else "Assistant"
-                roleName + ": " + it.content
+
+            val history = _messages.value.takeLast(4)
+            val prompt = history.joinToString("\n") { msg ->
+                val role = if (msg.role == "user") "User" else "Assistant"
+                role + ": " + msg.content
             } + "\nAssistant:"
 
             try {
-                val method = currentCtx.javaClass.methods.find { it.name == "completion" || it.name == "sendPrompt" }
-                
-                val result = when (method?.parameterTypes?.size) {
-                    1 -> method.invoke(currentCtx, prompt)
-                    2 -> {
-                        if (method.parameterTypes[1] == Map::class.java) {
-                            method.invoke(currentCtx, prompt, emptyMap<String, Any>())
-                        } else {
-                            method.invoke(currentCtx, prompt, 128)
-                        }
-                    }
-                    else -> method?.invoke(currentCtx, prompt)
+                val method = currentCtx.javaClass.methods.firstOrNull {
+                    it.name == "completion" || it.name == "sendPrompt"
                 }
 
-                _messages.value = _messages.value + ChatMessage("assistant", result?.toString()?.trim() ?: "No response")
+                val result: Any? = if (method != null) {
+                    val paramCount = method.parameterTypes.size
+                    when (paramCount) {
+                        1 -> method.invoke(currentCtx, prompt)
+                        2 -> {
+                            val type = method.parameterTypes[1]
+                            if (type == Int::class.javaPrimitiveType || type == Int::class.java) {
+                                method.invoke(currentCtx, prompt, 128)
+                            } else {
+                                method.invoke(currentCtx, prompt, emptyMap<String, Any>())
+                            }
+                        }
+                        else -> method.invoke(currentCtx, prompt)
+                    }
+                } else {
+                    "No method found"
+                }
+
+                val textResult = result?.toString()?.trim() ?: "ไม่มีคำตอบ"
+
+                _messages.value = _messages.value + ChatMessage("assistant", textResult)
+
             } catch (e: Exception) {
-                _messages.value = _messages.value + ChatMessage("assistant", "Error: " + e.message)
+                _messages.value = _messages.value + ChatMessage("assistant", "Error: " + (e.message ?: "unknown"))
             }
+
             _chatState.value = ChatUiState.Idle
         }
     }
 
     private fun closeContext() {
         try {
-            ctx?.let { 
-                val closeMethod = it.javaClass.methods.find { m -> m.name == "close" || m.name == "release" }
-                closeMethod?.invoke(it)
+            ctx?.let {
+                val method = it.javaClass.methods.firstOrNull { m ->
+                    m.name == "close" || m.name == "release"
+                }
+                method?.invoke(it)
             }
-        } catch (e: Exception) {}
+        } catch (_: Exception) {
+        }
         ctx = null
     }
 
