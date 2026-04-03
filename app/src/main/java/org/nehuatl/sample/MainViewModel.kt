@@ -19,36 +19,31 @@ class MainViewModel(
     private val _chatState = MutableStateFlow<ChatUiState>(ChatUiState.Idle)
     val chatState: StateFlow<ChatUiState> = _chatState
 
-    private val _modelName = MutableStateFlow("สแกนหา Factory Method")
+    private val _modelName = MutableStateFlow("สแกนหาทางเข้า...")
     val modelName: StateFlow<String> = _modelName
 
     fun setModel(uriString: String, name: String) {
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.LoadingModel
             try {
+                // 1. หาคลาสตัวจริง
                 val clazz = listOf("org.nehuatl.llamacpp.LlamaContext", "org.nehuatl.llamacpp.LLamaContext")
                     .firstNotNullOfOrNull { try { Class.forName(it) } catch (e: Exception) { null } }
                     ?: throw Exception("Library not found")
 
-                // 🔍 สแกนหา Static Method ที่คืนค่าเป็นคลาสตัวมันเอง
-                val factoryMethods = clazz.methods
-                    .filter { Modifier.isStatic(it.modifiers) && (it.returnType == clazz || it.returnType.name.contains("LlamaContext")) }
+                // 2. สแกนหา Static Method ทั้งหมด (ประตูข้าง)
+                val methods = clazz.methods
+                    .filter { Modifier.isStatic(it.modifiers) }
                     .joinToString("\n") { m -> 
-                        "✨ ${m.name}(${m.parameterTypes.joinToString { it.simpleName }})"
+                        "${m.name}(${m.parameterTypes.joinToString { it.simpleName }}) -> ${m.returnType.simpleName}"
                     }
 
-                // 🔍 สแกนหา Method อื่น ๆ ที่น่าสงสัย
-                val otherMethods = clazz.methods
-                    .filter { Modifier.isStatic(it.modifiers) && it.name.lowercase().let { n -> n.contains("create") || n.contains("load") || n.contains("init") } }
-                    .joinToString("\n") { m -> 
-                        "🔍 ${m.name} -> ${m.returnType.simpleName}"
-                    }
-
-                throw Exception("--- พบช่องทางเข้า ---\n$factoryMethods\n$otherMethods")
+                // 3. พ่นรายชื่อออกมาดู
+                throw Exception("--- รายชื่อประตูข้าง ---\n$methods")
 
             } catch (e: Exception) {
-                _modelName.value = "❌ พบช่องทางแล้ว"
-                _chatState.value = ChatUiState.Error(e.message ?: "Unknown Error")
+                _modelName.value = "🔍 สแกนสำเร็จ"
+                _chatState.value = ChatUiState.Error(e.message ?: "Unknown")
             }
         }
     }
