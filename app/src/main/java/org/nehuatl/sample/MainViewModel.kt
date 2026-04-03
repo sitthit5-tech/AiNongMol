@@ -13,7 +13,10 @@ import org.nehuatl.llamacpp.LLamaContext
 import java.io.File
 import java.io.FileOutputStream
 
-class MainViewModel(private val contentResolver: ContentResolver) : ViewModel() {
+class MainViewModel(
+    private val contentResolver: ContentResolver,
+    private val filesDir: File // ✅ รับ filesDir จาก Android Context โดยตรง
+) : ViewModel() {
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
 
@@ -30,18 +33,25 @@ class MainViewModel(private val contentResolver: ContentResolver) : ViewModel() 
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.LoadingModel
             try {
+                // 🧹 ล้างของเก่าแบบสะอาดหมดจด
+                llamaContext = null
                 currentModelFile?.delete()
-                val uri = Uri.parse(uriString)
                 
-                // 📂 ใช้คาถาเดิม: โหลดเข้า Temp Dir ของระบบที่เคยผ่านชัวร์ๆ
-                val internalFile = File(System.getProperty("java.io.tmpdir"), "active_model.gguf")
+                val uri = Uri.parse(uriString)
+                // 📂 ใช้ filesDir ที่แน่นอนที่สุดสำหรับ Native Reading
+                val internalFile = File(filesDir, "active_model.gguf")
+                
                 contentResolver.openInputStream(uri)?.use { input ->
-                    FileOutputStream(internalFile).use { output -> input.copyTo(output) }
+                    FileOutputStream(internalFile).use { output ->
+                        input.copyTo(output)
+                    }
                 }
                 
+                // 🧠 โหลดโมเดลจาก Path ที่การันตีว่าอ่านได้
                 val ctx = LLamaContext(internalFile.absolutePath)
                 llamaContext = ctx
                 currentModelFile = internalFile
+                
                 _modelName.value = name
                 _chatState.value = ChatUiState.Idle
             } catch (e: Exception) {
@@ -61,15 +71,13 @@ class MainViewModel(private val contentResolver: ContentResolver) : ViewModel() 
 
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.Generating("")
-            
-            // ใช้ Prompt มาตรฐานที่ AI ส่วนใหญ่เข้าใจ
             val prompt = "User: $userText\nAssistant:"
             var response = ""
             try {
-                // ⚡ เชื่อมต่อ Engine จริง (Inference)
+                // ⚡ รัน Inference จริงแบบ Non-stream เพื่อความนิ่ง
                 response = ctx.sendPrompt(prompt, temperature = 0.7f, maxTokens = 256)
             } catch (e: Exception) {
-                response = "น้องมลเอ๋อค่ะพี่: ${e.message}"
+                response = "เกิดปัญหา: ${e.message}"
             }
             
             val updatedMsgs = _messages.value.toMutableList()
