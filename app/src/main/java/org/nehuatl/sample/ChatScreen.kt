@@ -15,18 +15,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
-// 🎯 เพิ่ม Import สองตัวนี้เพื่อให้ 'by collectAsState()' ทำงานได้
-import androidx.compose.runtime.getValue 
+// ✅ Import หัวใจสำคัญสำหรับ Property Delegate (by)
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 
 @Composable
 fun ChatScreen(viewModel: MainViewModel, onPickModel: () -> Unit) {
-    // 🛡️ คราวนี้ Kotlin จะรู้แล้วว่า messages คือ List<ChatMessage>
+    // 🛡️ เชื่อมต่อ StateFlow จาก ViewModel
     val messages by viewModel.messages.collectAsState()
     val chatState by viewModel.chatState.collectAsState()
     val modelName by viewModel.modelName.collectAsState()
     val listState = rememberLazyListState()
 
+    // Auto-scroll เมื่อมีข้อความใหม่ (เลื่อนไป Index 0 เพราะเราใช้ reverseLayout)
     LaunchedEffect(messages.size, chatState) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(0)
@@ -34,6 +36,7 @@ fun ChatScreen(viewModel: MainViewModel, onPickModel: () -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().background(Color(0xFF121212))) {
+        // --- Top Bar ---
         Row(
             Modifier.fillMaxWidth().padding(12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -43,6 +46,7 @@ fun ChatScreen(viewModel: MainViewModel, onPickModel: () -> Unit) {
             IconButton(onClick = onPickModel) { Text("📂", color = Color.White) }
         }
 
+        // --- Chat Area ---
         if (modelName.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Text("กรุณาเลือกโมเดลก่อนใช้งานค่ะพี่ ✨", color = Color.Gray)
@@ -51,14 +55,16 @@ fun ChatScreen(viewModel: MainViewModel, onPickModel: () -> Unit) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp), 
-                reverseLayout = true
+                reverseLayout = true // ✅ กลับด้าน Layout เพื่อให้พิมพ์แล้วดันขึ้นจากล่าง
             ) {
-                items(messages.reversed()) { msg ->
+                // ✅ ส่ง List ปกติเข้าไป (ไม่ต้อง .reversed() แล้ว) เพราะ reverseLayout จัดการให้แล้ว
+                items(messages.asReversed()) { msg ->
                     ChatBubble(msg)
                 }
             }
         }
 
+        // --- Status Indicator ---
         if (chatState is ChatUiState.Generating) {
             Text("น้องมลกำลังคิด...", color = Color.Gray, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall)
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(1.dp), color = Color(0xFF4CAF50))
