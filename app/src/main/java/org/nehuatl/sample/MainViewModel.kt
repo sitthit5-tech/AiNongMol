@@ -5,9 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import org.nehuatl.llamacpp.LlamaContext
 import java.io.File
@@ -17,69 +15,69 @@ class MainViewModel(
     private val contentResolver: ContentResolver,
     private val filesDir: File
 ) : ViewModel() {
+
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
-    val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
+    val messages: StateFlow<List<ChatMessage>> = _messages
 
     private val _chatState = MutableStateFlow<ChatUiState>(ChatUiState.Idle)
-    val chatState: StateFlow<ChatUiState> = _chatState.asStateFlow()
+    val chatState: StateFlow<ChatUiState> = _chatState
 
-    private val _modelName = MutableStateFlow("")
-    val modelName: StateFlow<String> = _modelName.asStateFlow()
+    private val _modelName = MutableStateFlow("ไม่ได้เลือกโมเดล")
+    val modelName: StateFlow<String> = _modelName
 
-    private var llamaContext: LlamaContext? = null
-    private var currentModelFile: File? = null
+    private var ctx: LlamaContext? = null
 
     fun setModel(uriString: String, name: String) {
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.LoadingModel
             try {
-                llamaContext = null
-                currentModelFile?.delete()
+                ctx?.close()
+                ctx = null
+                val file = File(filesDir, "model.gguf")
+                if (file.exists()) file.delete()
                 
-                val uri = Uri.parse(uriString)
-                // ✅ ใช้ filesDir ที่ส่งมาจาก MainActivity ชัวร์ที่สุด
-                val internalFile = File(filesDir, "active_model.gguf")
-                
-                contentResolver.openInputStream(uri)?.use { input ->
-                    FileOutputStream(internalFile).use { output ->
-                        input.copyTo(output)
-                    }
+                contentResolver.openInputStream(Uri.parse(uriString))?.use { input ->
+                    FileOutputStream(file).use { output -> input.copyTo(output) }
                 }
                 
-                val ctx = LlamaContext(internalFile.absolutePath)
-                llamaContext = ctx
-                currentModelFile = internalFile
+                ctx = LlamaContext(file.absolutePath)
                 _modelName.value = name
                 _chatState.value = ChatUiState.Idle
             } catch (e: Exception) {
-                _chatState.value = ChatUiState.Idle
-                _modelName.value = "Error: ${e.message}"
+                _chatState.value = ChatUiState.Error(e.message ?: "Load Fail")
             }
         }
     }
 
-    fun sendPrompt(userText: String) {
-        val ctx = llamaContext ?: return
+    fun sendPrompt(text: String) {
+        val currentCtx = ctx ?: return
         if (_chatState.value is ChatUiState.Generating) return
 
-        val userMsgs = _messages.value.toMutableList()
-        userMsgs.add(ChatMessage("user", userText))
-        _messages.value = userMsgs
+        _messages.value = _messages.value + ChatMessage("user", text)
 
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.Generating("")
-            val prompt = "User: $userText\nAssistant:"
-            var response = ""
-            try {
-                response = ctx.sendPrompt(prompt, temperature = 0.7f, maxTokens = 256)
-            } catch (e: Exception) {
-                response = "เกิดปัญหา: ${e.message}"
-            }
             
-            val updatedMsgs = _messages.value.toMutableList()
-            updatedMsgs.add(ChatMessage("assistant", response.trim()))
-            _messages.value = updatedMsgs
+            // สร้าง Prompt แบบ Chat History (จดจำบริบท 5 ข้อความล่าสุด)
+            val prompt = _messages.value.takeLast(6).joinToString("\n") { 
+                "${if (it.role == \"user\") \"User\" else \"Assistant\"}: ${it.content}" 
+            } + "\nAssistant:"
+
+            val response = try {
+                // ✅ Fix เป็น completion(prompt) ตามมาตรฐาน llama.cpp wrapper ส่วนใหญ่
+                currentCtx.completion(prompt)
+            } catch (e: Exception) {
+                "Error: ${e.message}"
+            }
+
+            _messages.value = _messages.value + ChatMessage("assistant", response.trim())
             _chatState.value = ChatUiState.Idle
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        ctx?.close()
+        ctx = null
     }
 }
