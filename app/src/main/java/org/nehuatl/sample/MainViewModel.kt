@@ -1,13 +1,17 @@
 package org.nehuatl.sample
 
 import android.content.ContentResolver
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.nehuatl.llamacpp.LLamaContext
+import java.io.File
+import java.io.FileOutputStream
 
 class MainViewModel(private val contentResolver: ContentResolver) : ViewModel() {
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
@@ -19,32 +23,58 @@ class MainViewModel(private val contentResolver: ContentResolver) : ViewModel() 
     private val _modelName = MutableStateFlow("")
     val modelName: StateFlow<String> = _modelName.asStateFlow()
 
-    fun setModel(uri: String, name: String) {
-        _modelName.value = name
+    private var llamaContext: LLamaContext? = null
+    private var currentModelFile: File? = null
+
+    fun setModel(uriString: String, name: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _chatState.value = ChatUiState.LoadingModel
+            try {
+                currentModelFile?.delete()
+                val uri = Uri.parse(uriString)
+                
+                // 📂 ใช้คาถาเดิม: โหลดเข้า Temp Dir ของระบบที่เคยผ่านชัวร์ๆ
+                val internalFile = File(System.getProperty("java.io.tmpdir"), "active_model.gguf")
+                contentResolver.openInputStream(uri)?.use { input ->
+                    FileOutputStream(internalFile).use { output -> input.copyTo(output) }
+                }
+                
+                val ctx = LLamaContext(internalFile.absolutePath)
+                llamaContext = ctx
+                currentModelFile = internalFile
+                _modelName.value = name
+                _chatState.value = ChatUiState.Idle
+            } catch (e: Exception) {
+                _chatState.value = ChatUiState.Idle
+                _modelName.value = "โหลดพลาด: ${e.message}"
+            }
+        }
     }
 
     fun sendPrompt(userText: String) {
+        val ctx = llamaContext ?: return
         if (_chatState.value is ChatUiState.Generating) return
 
-        // 1. เพิ่มข้อความ User เข้าไปใน List
-        val currentMsgs = _messages.value.toMutableList()
-        currentMsgs.add(ChatMessage("user", userText))
-        _messages.value = currentMsgs
+        val userMsgs = _messages.value.toMutableList()
+        userMsgs.add(ChatMessage("user", userText))
+        _messages.value = userMsgs
 
-        viewModelScope.launch {
-            // 2. เปลี่ยนสถานะเป็น Generating (ส่งค่าว่างไปก่อน)
+        viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.Generating("")
             
-            // 3. Mock การหน่วงเวลาของ AI
-            delay(1000)
-            val mockResponse = "น้องมลได้รับข้อความ '$userText' แล้วค่ะ! (ตอนนี้ Build ผ่านแล้ว เดี๋ยวเราค่อยเชื่อมสมอง AI กันนะคะพี่)"
+            // ใช้ Prompt มาตรฐานที่ AI ส่วนใหญ่เข้าใจ
+            val prompt = "User: $userText\nAssistant:"
+            var response = ""
+            try {
+                // ⚡ เชื่อมต่อ Engine จริง (Inference)
+                response = ctx.sendPrompt(prompt, temperature = 0.7f, maxTokens = 256)
+            } catch (e: Exception) {
+                response = "น้องมลเอ๋อค่ะพี่: ${e.message}"
+            }
             
-            // 4. อัปเดตข้อความ Assistant
             val updatedMsgs = _messages.value.toMutableList()
-            updatedMsgs.add(ChatMessage("assistant", mockResponse))
+            updatedMsgs.add(ChatMessage("assistant", response.trim()))
             _messages.value = updatedMsgs
-            
-            // 5. กลับสู่สถานะ Idle
             _chatState.value = ChatUiState.Idle
         }
     }

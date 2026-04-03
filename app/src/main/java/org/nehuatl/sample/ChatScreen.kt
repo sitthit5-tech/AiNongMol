@@ -5,85 +5,97 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
-// ✅ Import หัวใจสำคัญสำหรับ Property Delegate (by)
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.collectAsState
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(viewModel: MainViewModel, onPickModel: () -> Unit) {
-    // 🛡️ เชื่อมต่อ StateFlow จาก ViewModel
     val messages by viewModel.messages.collectAsState()
     val chatState by viewModel.chatState.collectAsState()
     val modelName by viewModel.modelName.collectAsState()
     val listState = rememberLazyListState()
 
-    // Auto-scroll เมื่อมีข้อความใหม่ (เลื่อนไป Index 0 เพราะเราใช้ reverseLayout)
-    LaunchedEffect(messages.size, chatState) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(0)
-        }
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) listState.animateScrollToItem(0)
     }
 
-    Column(Modifier.fillMaxSize().background(Color(0xFF121212))) {
-        // --- Top Bar ---
-        Row(
-            Modifier.fillMaxWidth().padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("🤖 NongMol AI", color = Color.White, style = MaterialTheme.typography.titleMedium)
-            IconButton(onClick = onPickModel) { Text("📂", color = Color.White) }
-        }
-
-        // --- Chat Area ---
-        if (modelName.isEmpty()) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("กรุณาเลือกโมเดลก่อนใช้งานค่ะพี่ ✨", color = Color.Gray)
-            }
-        } else {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { 
+                    Column {
+                        Text("น้องมล AI", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        if (modelName.isNotEmpty()) {
+                            Text(modelName, fontSize = 10.sp, color = Color.Gray)
+                        }
+                    }
+                },
+                actions = {
+                    Button(
+                        onClick = onPickModel,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333)),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Text("📂 เลือกโมเดล", fontSize = 12.sp)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF1A1A1A), titleContentColor = Color.White)
+            )
+        },
+        containerColor = Color(0xFF121212)
+    ) { padding ->
+        Column(Modifier.padding(padding).fillMaxSize()) {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.weight(1f).padding(horizontal = 8.dp), 
-                reverseLayout = true // ✅ กลับด้าน Layout เพื่อให้พิมพ์แล้วดันขึ้นจากล่าง
+                modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
+                reverseLayout = true
             ) {
-                // ✅ ส่ง List ปกติเข้าไป (ไม่ต้อง .reversed() แล้ว) เพราะ reverseLayout จัดการให้แล้ว
                 items(messages.asReversed()) { msg ->
                     ChatBubble(msg)
                 }
             }
-        }
 
-        // --- Status Indicator ---
-        if (chatState is ChatUiState.Generating) {
-            Text("น้องมลกำลังคิด...", color = Color.Gray, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall)
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(1.dp), color = Color(0xFF4CAF50))
-        }
+            if (chatState is ChatUiState.LoadingModel) {
+                LinearProgressIndicator(Modifier.fillMaxWidth(), color = Color.Cyan)
+            }
+            
+            if (chatState is ChatUiState.Generating) {
+                Text("น้องมลกำลังคิด...", color = Color.Gray, modifier = Modifier.padding(16.dp), fontSize = 12.sp)
+            }
 
-        ChatInputBar(enabled = modelName.isNotEmpty()) { viewModel.sendPrompt(it) }
+            ChatInputBar(enabled = modelName.isNotEmpty()) { viewModel.sendPrompt(it) }
+        }
     }
 }
 
 @Composable
 fun ChatBubble(msg: ChatMessage) {
     val isUser = msg.role == "user"
-    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+    ) {
         Surface(
-            color = if (isUser) Color(0xFF4CAF50) else Color(0xFF2A2A2A),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.padding(horizontal = 8.dp)
+            color = if (isUser) Color(0xFF007AFF) else Color(0xFF2C2C2E),
+            shape = RoundedCornerShape(
+                topStart = 16.dp, topEnd = 16.dp,
+                bottomStart = if (isUser) 16.dp else 2.dp,
+                bottomEnd = if (isUser) 2.dp else 16.dp
+            ),
+            modifier = Modifier.widthIn(max = 300.dp)
         ) {
-            Text(msg.content, color = Color.White, modifier = Modifier.padding(12.dp))
+            Text(msg.content, color = Color.White, modifier = Modifier.padding(12.dp), fontSize = 15.sp)
         }
     }
 }
@@ -91,18 +103,32 @@ fun ChatBubble(msg: ChatMessage) {
 @Composable
 fun ChatInputBar(enabled: Boolean, onSend: (String) -> Unit) {
     var text by remember { mutableStateOf("") }
-    Surface(color = Color(0xFF1E1E1E), tonalElevation = 2.dp) {
-        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Surface(color = Color(0xFF1C1C1E), modifier = Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.padding(12.dp).navigationBarsPadding().imePadding(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             TextField(
                 value = text,
                 onValueChange = { text = it },
                 modifier = Modifier.weight(1f),
                 enabled = enabled,
-                placeholder = { Text("พิมพ์ข้อความหาพี่มล...", color = Color.Gray) },
-                colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent)
+                placeholder = { Text("ถามอะไรหน่อยค่ะพี่...", color = Color.Gray) },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                )
             )
-            IconButton(onClick = { if (text.isNotBlank()) { onSend(text); text = "" } }, enabled = enabled) {
-                Icon(Icons.Default.Send, contentDescription = "Send", tint = if (enabled) Color(0xFF4CAF50) else Color.Gray)
+            IconButton(
+                onClick = { if (text.isNotBlank()) { onSend(text); text = "" } },
+                enabled = enabled,
+                modifier = Modifier.background(if (enabled) Color(0xFF007AFF) else Color.DarkGray, CircleShape)
+            ) {
+                Icon(Icons.Default.Send, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
             }
         }
     }
