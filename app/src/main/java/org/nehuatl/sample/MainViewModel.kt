@@ -37,17 +37,16 @@ class MainViewModel(
                     FileOutputStream(file).use { output -> input.copyTo(output) }
                 }
 
-                // ค้นหา Class และสร้าง Instance (ใช้ท่า Safe Reflection)
                 val clazz = listOf("org.nehuatl.llamacpp.LlamaContext", "org.nehuatl.llamacpp.LLamaContext")
                     .firstNotNullOfOrNull { try { Class.forName(it) } catch (e: Exception) { null } }
-                    ?: throw Exception("ไม่พบ Library AI")
+                    ?: throw Exception("ไม่พบ Library")
 
                 ctx = clazz.getConstructor(String::class.java).newInstance(file.absolutePath)
                 
                 _modelName.value = name
                 _chatState.value = ChatUiState.Idle
             } catch (e: Exception) {
-                _modelName.value = "❌ โหลดพลาด: " + e.message
+                _modelName.value = "❌ " + (e.message ?: "Load Fail")
                 _chatState.value = ChatUiState.Error(e.message ?: "Load Fail")
             }
         }
@@ -61,35 +60,36 @@ class MainViewModel(
 
         viewModelScope.launch(Dispatchers.IO) {
             _chatState.value = ChatUiState.Generating("")
-
-            val prompt = _messages.value.takeLast(4).joinToString("\n") {
-                val role = if (it.role == "user") "User" else "Assistant"
-                "$role: ${it.content}"
+            val prompt = _messages.value.takeLast(4).joinToString("\n") { 
+                "${if (it.role == "user") "User" else "Assistant"}: ${it.content}" 
             } + "\nAssistant:"
 
             try {
-                // 🎯 จุดตาย: เรียก Method 'completion' ด้วย (String, Map)
-                val method = currentCtx.javaClass.methods.firstOrNull { it.name == "completion" }
+                val methods = currentCtx.javaClass.methods
                 
-                val params = mapOf(
-                    "n_predict" to 128,
-                    "temperature" to 0.7,
-                    "top_k" to 40,
-                    "top_p" to 0.9,
-                    "repeat_penalty" to 1.1
-                )
+                // 🔍 1. หา Method สำหรับส่ง Prompt (เช่น setPrompt, feed, tokenize)
+                val setPromptMethod = methods.firstOrNull { 
+                    val n = it.name.lowercase()
+                    (n.contains("prompt") || n.contains("feed") || n.contains("text")) && it.parameterTypes.size == 1
+                }
+                
+                // 🔍 2. หา Method completion(Int, Map)
+                val completionMethod = methods.firstOrNull { 
+                    it.name == "completion" && it.parameterTypes.size == 2
+                }
 
-                // เรียกใช้จริง: invoke(object, arg1, arg2)
-                val result = method?.invoke(currentCtx, prompt, params)
+                // 🔥 ปฏิบัติการ:
+                setPromptMethod?.invoke(currentCtx, prompt)
 
-                val textResult = result?.toString()?.trim() ?: "ไม่มีคำตอบจาก AI"
+                val params = mapOf("temperature" to 0.7, "top_k" to 40)
+                val result = completionMethod?.invoke(currentCtx, 128, params)
+
+                val textResult = result?.toString()?.trim() ?: "ไม่มีคำตอบ"
                 _messages.value = _messages.value + ChatMessage("assistant", textResult)
 
             } catch (e: Exception) {
-                val errorMsg = e.cause?.message ?: e.message ?: "Unknown Error"
-                _messages.value = _messages.value + ChatMessage("assistant", "Error: $errorMsg")
+                _messages.value = _messages.value + ChatMessage("assistant", "Error: " + (e.cause?.message ?: e.message))
             }
-
             _chatState.value = ChatUiState.Idle
         }
     }
