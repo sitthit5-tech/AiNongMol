@@ -1,6 +1,7 @@
 package org.nehuatl.sample
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -20,16 +21,33 @@ import org.nehuatl.sample.ui.theme.KotlinLlamaCppTheme
 class MainActivity : ComponentActivity() {
 
     private var modelPath by mutableStateOf<String?>(null)
+    private var mmprojPath by mutableStateOf<String?>(null)
+    private var imagePath by mutableStateOf<String?>(null)
 
-    private val filePickerLauncher = registerForActivityResult(
+    private val modelPickerLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let {
-            contentResolver.takePersistableUriPermission(
-                it,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
+            contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             modelPath = it.toString()
+        }
+    }
+
+    private val mmprojPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            mmprojPath = it.toString()
+        }
+    }
+
+    private val imagePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            imagePath = it.toString()
         }
     }
 
@@ -39,7 +57,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             KotlinLlamaCppTheme {
-                val viewModel: MainViewModel = viewModel{
+                val viewModel: MainViewModel = viewModel {
                     MainViewModel(contentResolver)
                 }
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -47,9 +65,11 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.padding(innerPadding),
                         viewModel = viewModel,
                         currentModelPath = modelPath,
-                        onPickModel = {
-                            filePickerLauncher.launch(arrayOf("*/*"))
-                        }
+                        mmprojPath = mmprojPath,
+                        imagePath = imagePath,
+                        onPickModel = { modelPickerLauncher.launch(arrayOf("*/*")) },
+                        onPickMmproj = { mmprojPickerLauncher.launch(arrayOf("*/*")) },
+                        onPickImage = { imagePickerLauncher.launch(arrayOf("image/*")) }
                     )
                 }
             }

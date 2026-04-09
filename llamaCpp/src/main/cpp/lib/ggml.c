@@ -710,11 +710,15 @@ FILE * lm_ggml_fopen(const char * fname, const char * mode) {
     if (strchr(fname, '/') == NULL) {
         char *endptr;
         long num = strtol(fname, &endptr, 10);
-        FILE *file = fdopen(dup(num), mode);
-
-        if (file != NULL) {
-            return file;
-        } 
+        int target_fd = (int)num;
+        int d = dup(target_fd);
+        if (d != -1) {
+            FILE *file = fdopen(d, mode);
+            if (file != NULL) {
+                return file;
+            }
+            close(d);
+        }
     }
     return fopen(fname, mode);
 #else

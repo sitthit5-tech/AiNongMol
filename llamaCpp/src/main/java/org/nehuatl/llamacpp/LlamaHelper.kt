@@ -1,8 +1,8 @@
 package org.nehuatl.llamacpp
 
 import android.content.ContentResolver
+import android.net.Uri
 import android.util.Log
-import androidx.core.net.toUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -30,58 +30,99 @@ class LlamaHelper(
         loaded: (Long) -> Unit
     ) {
         currentContext?.let { id -> llama.releaseContext(id) }
-        val actualPath = if (path.startsWith("content://")) {
-            path
-        } else {
-            path.removePrefix("file://")
-        }
-        val uri = actualPath.toUri()
-        val pfd = contentResolver.openFileDescriptor(uri, "r")
-            ?: throw IllegalArgumentException("Cannot open URI")
-        val fd = pfd.detachFd()
-        val config = mutableMapOf<String, Any>(
-            "model" to path,
-            "model_fd" to fd,
-            "use_mmap" to false,
-            "use_mlock" to false,
-            "n_ctx" to contextLength,
-        )
-        mmprojPath?.let { config["mmproj"] = it }
-        config["images"] = imagePaths
+        
+        try {
+            val modelUri = Uri.parse(path)
+            Log.d("LlamaHelper", ">>> Opening model FD for URI: $modelUri")
+            
+            // Explicitly check readability
+            contentResolver.openInputStream(modelUri)?.use { input ->
+                val firstByte = input.read()
+                Log.d("LlamaHelper", ">>> Model is readable, first byte: $firstByte")
+            } ?: Log.e("LlamaHelper", ">>> Model is NOT readable via openInputStream")
 
-        loadJob = scope.launch {
-            Log.d("LlamaHelper", ">>> will start llama context with config: $config")
-            val result = llama.startEngine(config) {
-                allText += it
-                tokenCount++
-                sharedFlow.tryEmit(LLMEvent.Ongoing(it, tokenCount))
-            }
+            val modelPfd = contentResolver.openFileDescriptor(modelUri, "r")
+                ?: throw IllegalArgumentException("Cannot open model URI: $modelUri")
+            val modelFd = modelPfd.detachFd()
+            Log.d("LlamaHelper", ">>> Model FD: $modelFd")
 
-            if (result == null) {
-                throw Exception("initContext returned null - model initialization failed")
-            }
+            val config = mutableMapOf<String, Any>(
+                "model" to path,
+                "model_fd" to modelFd,
+                "use_mmap" to false,
+                "use_mlock" to false,
+                "n_ctx" to contextLength,
+                "embedding" to false,
+                "n_batch" to 512,
+                "n_threads" to 0,
+                "n_gpu_layers" to 0,
+                "vocab_only" to false,
+                "lora" to "",
+                "lora_scaled" to 1.0,
+                "rope_freq_base" to 0.0,
+                "rope_freq_scale" to 0.0
+            )
 
-            val id = result["contextId"] ?: throw Exception("contextId not found in result map: $result")
-
-            currentContext = when (id) {
-                is Int -> id
-                is Number -> id.toInt()
-                else -> {
-                    throw Exception("contextId has unexpected type: ${id::class.java.simpleName}, value: $id")
+            mmprojPath?.let {
+                val mmUri = Uri.parse(it)
+                Log.d("LlamaHelper", ">>> Opening mmproj FD for URI: $mmUri")
+                val mmPfd = contentResolver.openFileDescriptor(mmUri, "r")
+                if (mmPfd != null) {
+                    val mmFd = mmPfd.detachFd()
+                    config["mmproj_fd"] = mmFd
+                    Log.d("LlamaHelper", ">>> Mmproj FD: $mmFd")
                 }
             }
 
-            Log.d("LlamaHelper", ">>> Context loaded successfully with ID: $currentContext")
-            pfd.close()
-            sharedFlow.tryEmit(LLMEvent.Loaded(path))
-            loaded(currentContext!!.toLong())
+            val imageFds = mutableListOf<Int>()
+            for (imgPath in imagePaths) {
+                val imgUri = Uri.parse(imgPath)
+                Log.d("LlamaHelper", ">>> Opening image FD for URI: $imgUri")
+                val imgPfd = contentResolver.openFileDescriptor(imgUri, "r")
+                if (imgPfd != null) {
+                    val imgFd = imgPfd.detachFd()
+                    imageFds.add(imgFd)
+                    Log.d("LlamaHelper", ">>> Image FD: $imgFd")
+                }
+            }
+            config["image_fds"] = imageFds
+
+            loadJob = scope.launch {
+                Log.d("LlamaHelper", ">>> will start llama context with config: $config")
+                val result = try {
+                    llama.startEngine(config) {
+                        allText += it
+                        tokenCount++
+                        sharedFlow.tryEmit(LLMEvent.Ongoing(it, tokenCount))
+                    }
+                } catch (e: Exception) {
+                    Log.e("LlamaHelper", "Engine start failed", e)
+                    null
+                }
+
+                if (result == null) {
+                    sharedFlow.tryEmit(LLMEvent.Error("Model initialization failed"))
+                    return@launch
+                }
+
+                val id = result["contextId"] ?: throw Exception("contextId not found in result map")
+                currentContext = (id as Number).toInt()
+
+                Log.d("LlamaHelper", ">>> Context loaded successfully with ID: $currentContext")
+                sharedFlow.tryEmit(LLMEvent.Loaded(path))
+                loaded(currentContext!!.toLong())
+            }
+        } catch (e: Exception) {
+            Log.e("LlamaHelper", "Failed to prepare model loading", e)
+            sharedFlow.tryEmit(LLMEvent.Error("Failed to open files: ${e.message}"))
         }
     }
 
     fun predict(prompt: String, partialCompletion: Boolean = true) {
-        val context = currentContext ?: throw Exception("Model was not loaded yet, load it first")
+        val context = currentContext ?: throw Exception("Model was not loaded yet")
         val startTime = System.currentTimeMillis()
         tokenCount = 0
+        allText = ""
         completionJob = scope.launch {
             llama.launchCompletion(
                 id = context,
@@ -96,9 +137,9 @@ class LlamaHelper(
     }
 
     fun stopPrediction() {
-        if (currentContext != null) return
+        val id = currentContext ?: return
         scope.launch {
-            llama.stopCompletion(currentContext!!)
+            llama.stopCompletion(id)
         }
         completionJob?.cancel()
     }
@@ -107,6 +148,7 @@ class LlamaHelper(
         currentContext?.let { id ->
             llama.releaseContext(id)
         }
+        currentContext = null
     }
 
     fun abort() {

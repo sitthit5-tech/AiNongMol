@@ -39,7 +39,11 @@ fun ChatScreen(
     modifier: Modifier = Modifier,
     viewModel: MainViewModel,
     currentModelPath: String?,
-    onPickModel: () -> Unit
+    mmprojPath: String?,
+    imagePath: String?,
+    onPickModel: () -> Unit,
+    onPickMmproj: () -> Unit,
+    onPickImage: () -> Unit
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val generatedText by viewModel.generatedText.collectAsStateWithLifecycle()
@@ -49,13 +53,6 @@ fun ChatScreen(
 
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
-
-    // Load model when path is available
-    LaunchedEffect(currentModelPath) {
-        if (currentModelPath != null && state is GenerationState.Idle) {
-            viewModel.loadModel(currentModelPath)
-        }
-    }
 
     // Show keyboard only when model is fully loaded and ready
     LaunchedEffect(state) {
@@ -71,9 +68,17 @@ fun ChatScreen(
 
     if (showModelDialog) {
         ModelPickerDialog(
-            onPickFile = {
+            currentModelPath = currentModelPath,
+            mmprojPath = mmprojPath,
+            imagePath = imagePath,
+            onPickModel = onPickModel,
+            onPickMmproj = onPickMmproj,
+            onPickImage = onPickImage,
+            onLoad = {
                 showModelDialog = false
-                onPickModel()
+                if (currentModelPath != null) {
+                    viewModel.loadModel(currentModelPath, mmprojPath, imagePath)
+                }
             },
             onDismiss = if (currentModelPath != null) {
                 { showModelDialog = false }
@@ -128,7 +133,13 @@ fun ChatScreen(
 
 @Composable
 private fun ModelPickerDialog(
-    onPickFile: () -> Unit,
+    currentModelPath: String?,
+    mmprojPath: String?,
+    imagePath: String?,
+    onPickModel: () -> Unit,
+    onPickMmproj: () -> Unit,
+    onPickImage: () -> Unit,
+    onLoad: () -> Unit,
     onDismiss: (() -> Unit)?
 ) {
     Dialog(
@@ -140,21 +151,37 @@ private fun ModelPickerDialog(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
-                    "Select GGUF Model",
+                    "Setup Multimodal Model",
                     style = MaterialTheme.typography.headlineSmall
                 )
 
-                Text(
-                    "Choose a .gguf model file from your device",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Model (GGUF): ${currentModelPath?.substringAfterLast("/") ?: "Not selected"}")
+                    Button(onClick = onPickModel, modifier = Modifier.fillMaxWidth()) {
+                        Text("Pick Model")
+                    }
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Mmproj: ${mmprojPath?.substringAfterLast("/") ?: "Not selected (optional)"}")
+                    Button(onClick = onPickMmproj, modifier = Modifier.fillMaxWidth()) {
+                        Text("Pick Mmproj")
+                    }
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Image: ${imagePath?.substringAfterLast("/") ?: "Not selected (optional)"}")
+                    Button(onClick = onPickImage, modifier = Modifier.fillMaxWidth()) {
+                        Text("Pick Image")
+                    }
+                }
 
                 Button(
-                    onClick = onPickFile,
+                    onClick = onLoad,
+                    enabled = currentModelPath != null,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Browse Files")
+                    Text("Load Model")
                 }
 
                 if (onDismiss != null) {
@@ -229,7 +256,7 @@ private fun StatusBar(
 
             if (!state.isActive()) {
                 TextButton(onClick = onChangeModel) {
-                    Text("Change")
+                    Text("Configure")
                 }
             }
         }

@@ -39,14 +39,20 @@ class MainViewModel(val contentResolver: ContentResolver): ViewModel() {
         )
     }
 
-    fun loadModel(path: String) {
+    fun loadModel(path: String, mmprojPath: String? = null, imagePath: String? = null) {
         if (_state.value is GenerationState.Generating) {
             Log.w("MainViewModel", "Cannot load model while generating")
             return
         }
         _state.value = GenerationState.LoadingModel
         try {
-            llamaHelper.load(path = path, contextLength = 2048) {
+            val imagePaths = if (imagePath != null) listOf(imagePath) else emptyList()
+            llamaHelper.load(
+                path = path,
+                contextLength = 2048,
+                mmprojPath = mmprojPath,
+                imagePaths = imagePaths
+            ) {
                 Log.i("MainViewModel", "Model loaded successfully")
                 _state.value = GenerationState.ModelLoaded(path)
             }

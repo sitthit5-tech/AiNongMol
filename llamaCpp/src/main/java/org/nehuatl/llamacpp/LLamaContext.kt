@@ -120,6 +120,9 @@ class LlamaContext(
             // int[] image_fds
             (params["image_fds"] as? List<Int>)?.toIntArray() ?: intArrayOf()
         )
+        if (this.context == 0L) {
+            throw IllegalStateException("Failed to initialize llama context")
+        }
         this.modelDetails = loadModelDetails(this.context).toMutableMap()
     }
 

@@ -283,12 +283,16 @@ Java_org_nehuatl_llamacpp_LlamaContext_initContextWithFd(
              model_fd, errno, strerror(errno));
         return 0;
     }
+    LOGI("dup(model_fd=%d) succeeded, new fd=%d", model_fd, dupfd);
 
     // --- IMPORTANT PART: Pass ONLY the number as string ------------------
     // rnllama expects a pure numeric string, NOT a path.
-    char *fdString = (char*) malloc(16);
-    snprintf(fdString, 16, "%d", dupfd);
+    char fdString[32];
+    snprintf(fdString, 32, "%d", dupfd);
     defaultParams.model = fdString;
+
+    // Log the model parameter to ensure it's correct
+    LOGI("defaultParams.model set to: %s", defaultParams.model.c_str());
 
     // ---------------------------------------------------------------------
 
@@ -302,21 +306,22 @@ Java_org_nehuatl_llamacpp_LlamaContext_initContextWithFd(
             n_threads > 0 ? n_threads : auto_threads;
 
     defaultParams.n_gpu_layers = n_gpu_layers;
-    defaultParams.use_mlock = false;   // safer on Android
-    defaultParams.use_mmap = false;    // required for FD loading
+    defaultParams.use_mlock = use_mlock;
+    defaultParams.use_mmap = use_mmap;
 
     const char *lora_chars = env->GetStringUTFChars(lora_str, nullptr);
     if (lora_chars && lora_chars[0] != '\0') {
         defaultParams.lora_adapters.push_back({lora_chars, lora_scaled});
-        defaultParams.use_mmap = false;
     }
 
     // Handle Multimodal parameters (using Proc FD trick)
     if (mmproj_fd >= 0) {
         int dup_mmproj_fd = dup(mmproj_fd);
-        char mmproj_path[32];
-        snprintf(mmproj_path, 32, "/proc/self/fd/%d", dup_mmproj_fd);
-        defaultParams.mmproj = mmproj_path;
+        if (dup_mmproj_fd != -1) {
+            char mmproj_path[32];
+            snprintf(mmproj_path, 32, "/proc/self/fd/%d", dup_mmproj_fd);
+            defaultParams.mmproj = mmproj_path;
+        }
     }
 
     if (image_fds != nullptr) {
@@ -324,9 +329,11 @@ Java_org_nehuatl_llamacpp_LlamaContext_initContextWithFd(
         jint *fds = env->GetIntArrayElements(image_fds, nullptr);
         for (jsize i = 0; i < len; i++) {
             int dup_img_fd = dup(fds[i]);
-            char img_path[32];
-            snprintf(img_path, 32, "/proc/self/fd/%d", dup_img_fd);
-            defaultParams.image.push_back(img_path);
+            if (dup_img_fd != -1) {
+                char img_path[32];
+                snprintf(img_path, 32, "/proc/self/fd/%d", dup_img_fd);
+                defaultParams.image.push_back(img_path);
+            }
         }
         env->ReleaseIntArrayElements(image_fds, fds, 0);
     }
@@ -337,20 +344,15 @@ Java_org_nehuatl_llamacpp_LlamaContext_initContextWithFd(
     auto llama = new rnllama::llama_rn_context();
     bool ok = llama->loadModel(defaultParams);
 
-    LOGI("[RNLlama] is_model_loaded = %s", ok ? "true" : "false");
-
-    if (!ok) {
-        close(dupfd);
-        free(fdString);
-        llama_free(llama->ctx);
-        return 0;
+    // model loaded — context is valid
+    if (ok) {
+        context_map[(long) llama->ctx] = llama;
+    } else {
+        delete llama;
     }
 
-    // model loaded — context is valid
-    context_map[(long) llama->ctx] = llama;
-
     env->ReleaseStringUTFChars(lora_str, lora_chars);
-    return reinterpret_cast<jlong>(llama->ctx);
+    return ok ? reinterpret_cast<jlong>(llama->ctx) : 0;
 }
 
 // ... Rest of the functions (loadModelDetails, getFormattedChat, etc.) ...
@@ -362,7 +364,9 @@ Java_org_nehuatl_llamacpp_LlamaContext_loadModelDetails(
         jlong context_ptr
 ) {
     UNUSED(thiz);
-    auto llama = context_map[(long) context_ptr];
+    auto it = context_map.find((long) context_ptr);
+    if (it == context_map.end()) return nullptr;
+    auto llama = it->second;
 
     int count = llama_model_meta_count(llama->model);
     auto meta = createHashMap(env);
@@ -397,7 +401,9 @@ Java_org_nehuatl_llamacpp_LlamaContext_getFormattedChat(
         jstring chat_template
 ) {
     UNUSED(thiz);
-    auto llama = context_map[(long) context_ptr];
+    auto it = context_map.find((long) context_ptr);
+    if (it == context_map.end()) return nullptr;
+    auto llama = it->second;
 
     std::vector<llama_chat_msg> chat;
 
@@ -442,7 +448,9 @@ Java_org_nehuatl_llamacpp_LlamaContext_loadSession(
         jstring path
 ) {
     UNUSED(thiz);
-    auto llama = context_map[(long) context_ptr];
+    auto it = context_map.find((long) context_ptr);
+    if (it == context_map.end()) return nullptr;
+    auto llama = it->second;
     const char *path_chars = env->GetStringUTFChars(path, nullptr);
 
     auto result = createHashMap(env);
@@ -472,7 +480,9 @@ Java_org_nehuatl_llamacpp_LlamaContext_saveSession(
         jint size
 ) {
     UNUSED(thiz);
-    auto llama = context_map[(long) context_ptr];
+    auto it = context_map.find((long) context_ptr);
+    if (it == context_map.end()) return -1;
+    auto llama = it->second;
 
     const char *path_chars = env->GetStringUTFChars(path, nullptr);
 
@@ -545,7 +555,9 @@ Java_org_nehuatl_llamacpp_LlamaContext_doCompletion(
         jobject partialCompletionCallback
 ) {
     UNUSED(thiz);
-    auto llama = context_map[(long) context_ptr];
+    auto it = context_map.find((long) context_ptr);
+    if (it == context_map.end()) return nullptr;
+    auto llama = it->second;
 
     llama->rewind();
 
@@ -719,7 +731,9 @@ Java_org_nehuatl_llamacpp_LlamaContext_stopCompletion(
         JNIEnv *env, jobject thiz, jlong context_ptr) {
     UNUSED(env);
     UNUSED(thiz);
-    auto llama = context_map[(long) context_ptr];
+    auto it = context_map.find((long) context_ptr);
+    if (it == context_map.end()) return;
+    auto llama = it->second;
     llama->is_interrupted = true;
 }
 
@@ -728,7 +742,9 @@ Java_org_nehuatl_llamacpp_LlamaContext_isPredicting(
         JNIEnv *env, jobject thiz, jlong context_ptr) {
     UNUSED(env);
     UNUSED(thiz);
-    auto llama = context_map[(long) context_ptr];
+    auto it = context_map.find((long) context_ptr);
+    if (it == context_map.end()) return false;
+    auto llama = it->second;
     return llama->is_predicting;
 }
 
@@ -736,7 +752,9 @@ JNIEXPORT jobject JNICALL
 Java_org_nehuatl_llamacpp_LlamaContext_tokenize(
         JNIEnv *env, jobject thiz, jlong context_ptr, jstring text) {
     UNUSED(thiz);
-    auto llama = context_map[(long) context_ptr];
+    auto it = context_map.find((long) context_ptr);
+    if (it == context_map.end()) return nullptr;
+    auto llama = it->second;
 
     const char *text_chars = env->GetStringUTFChars(text, nullptr);
 
@@ -759,7 +777,9 @@ JNIEXPORT jstring JNICALL
 Java_org_nehuatl_llamacpp_LlamaContext_detokenize(
         JNIEnv *env, jobject thiz, jlong context_ptr, jintArray tokens) {
     UNUSED(thiz);
-    auto llama = context_map[(long) context_ptr];
+    auto it = context_map.find((long) context_ptr);
+    if (it == context_map.end()) return nullptr;
+    auto llama = it->second;
 
     jsize tokens_len = env->GetArrayLength(tokens);
     jint *tokens_ptr = env->GetIntArrayElements(tokens, 0);
@@ -780,7 +800,9 @@ Java_org_nehuatl_llamacpp_LlamaContext_isEmbeddingEnabled(
         JNIEnv *env, jobject thiz, jlong context_ptr) {
     UNUSED(env);
     UNUSED(thiz);
-    auto llama = context_map[(long) context_ptr];
+    auto it = context_map.find((long) context_ptr);
+    if (it == context_map.end()) return false;
+    auto llama = it->second;
     return llama->params.embedding;
 }
 
@@ -788,7 +810,9 @@ JNIEXPORT jobject JNICALL
 Java_org_nehuatl_llamacpp_LlamaContext_embedding(
         JNIEnv *env, jobject thiz, jlong context_ptr, jstring text) {
     UNUSED(thiz);
-    auto llama = context_map[(long) context_ptr];
+    auto it = context_map.find((long) context_ptr);
+    if (it == context_map.end()) return nullptr;
+    auto llama = it->second;
 
     const char *text_chars = env->GetStringUTFChars(text, nullptr);
 
@@ -833,7 +857,9 @@ Java_org_nehuatl_llamacpp_LlamaContext_bench(
         jint nr
 ) {
     UNUSED(thiz);
-    auto llama = context_map[(long) context_ptr];
+    auto it = context_map.find((long) context_ptr);
+    if (it == context_map.end()) return nullptr;
+    auto llama = it->second;
     std::string result = llama->bench(pp, tg, pl, nr);
     return env->NewStringUTF(result.c_str());
 }
@@ -843,7 +869,9 @@ Java_org_nehuatl_llamacpp_LlamaContext_freeContext(
         JNIEnv *env, jobject thiz, jlong context_ptr) {
     UNUSED(env);
     UNUSED(thiz);
-    auto llama = context_map[(long) context_ptr];
+    auto it = context_map.find((long) context_ptr);
+    if (it == context_map.end()) return;
+    auto llama = it->second;
     if (llama->model) {
         llama_free_model(llama->model);
     }

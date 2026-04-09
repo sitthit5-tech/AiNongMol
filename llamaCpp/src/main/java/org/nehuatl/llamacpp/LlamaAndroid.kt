@@ -106,9 +106,12 @@ class LlamaAndroid(val resolver: ContentResolver) {
                 throw Exception("Context limit reached")
             }
             val id = Random().nextInt().absoluteValue
-            if (!isGGUF((params["model"] as String).toUri())) {
+            Log.d(NAME, "Checking if GGUF: ${params["model"]}")
+            if (!isGGUF(Uri.parse(params["model"] as String))) {
+                Log.e(NAME, "File is not in GGUF format: ${params["model"]}")
                 throw IllegalArgumentException("File is not in GGUF format")
             }
+            Log.d(NAME, "GGUF check passed")
             val llamaContext = LlamaContext(id, params)
             if (llamaContext.context == 0L) {
                 throw Exception("Failed to initialize context")
@@ -135,13 +138,20 @@ class LlamaAndroid(val resolver: ContentResolver) {
     fun isGGUF(uri: Uri): Boolean {
         val ggufHeader = byteArrayOf(0x47, 0x47, 0x55, 0x46)
         return try {
+            Log.d(NAME, "isGGUF: Opening stream for $uri")
             resolver.openInputStream(uri)?.use { input ->
                 val header = ByteArray(4)
-                if (input.read(header) != 4) return false
-                header.contentEquals(ggufHeader)
+                val read = input.read(header)
+                if (read != 4) {
+                    Log.w(NAME, "isGGUF: Failed to read 4 bytes, read $read")
+                    return false
+                }
+                val isGguf = header.contentEquals(ggufHeader)
+                Log.d(NAME, "isGGUF: result=$isGguf")
+                isGguf
             } ?: false
         } catch (err: Exception) {
-            Log.v(">>> GUF ERR", ">>> gguf err $err")
+            Log.e(NAME, "isGGUF: Error reading stream", err)
             false
         }
     }
