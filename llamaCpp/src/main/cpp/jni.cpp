@@ -11,6 +11,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 #include "llama.h"
 #include "rn-llama.hpp"
 #include "ggml.h"
@@ -44,9 +45,6 @@ static inline void putStringHashMap(JNIEnv *env, jobject hashMap, const char *ke
     jstring jValue = env->NewStringUTF(value);
 
     env->CallObjectMethod(hashMap, putMethod, jKey, jValue);
-    // Clean up local references
-    //env->DeleteLocalRef(jKey);
-    //env->DeleteLocalRef(jValue);
 }
 
 // Helper method to put an int into a Java HashMap
@@ -62,10 +60,6 @@ static inline void putIntHashMap(JNIEnv *env, jobject hashMap, const char *key, 
     jobject jValue = env->NewObject(integerClass, integerConstructor, value);
 
     env->CallObjectMethod(hashMap, putMethod, jKey, jValue);
-
-    // Clean up local references
-    //env->DeleteLocalRef(jKey);
-    //env->DeleteLocalRef(jValue);
 }
 
 // Helper method to put a double into a Java HashMap
@@ -81,10 +75,6 @@ static inline void putDoubleHashMap(JNIEnv *env, jobject hashMap, const char *ke
     jobject jValue = env->NewObject(doubleClass, doubleConstructor, value);
 
     env->CallObjectMethod(hashMap, putMethod, jKey, jValue);
-
-    // Clean up local references
-    //env->DeleteLocalRef(jKey);
-    //env->DeleteLocalRef(jValue);
 }
 
 // Helper method to put a boolean into a Java HashMap
@@ -100,10 +90,6 @@ static inline void putBooleanHashMap(JNIEnv *env, jobject hashMap, const char *k
     jobject jValue = env->NewObject(booleanClass, booleanConstructor, value);
 
     env->CallObjectMethod(hashMap, putMethod, jKey, jValue);
-
-    // Clean up local references
-    //env->DeleteLocalRef(jKey);
-    //env->DeleteLocalRef(jValue);
 }
 
 // Helper method to create a Java ArrayList
@@ -125,10 +111,6 @@ static inline void addIntArrayList(JNIEnv *env, jobject arrayList, int value) {
     jobject jValue = env->NewObject(integerClass, integerConstructor, value);
 
     env->CallBooleanMethod(arrayList, addMethod, jValue);
-
-    // Clean up local references
-    //env->DeleteLocalRef(jKey);
-    //env->DeleteLocalRef(jValue);
 }
 
 // Helper method to add a double to a Java ArrayList
@@ -142,10 +124,6 @@ static inline void addDoubleArrayList(JNIEnv *env, jobject arrayList, double val
     jobject jValue = env->NewObject(doubleClass, doubleConstructor, value);
 
     env->CallBooleanMethod(arrayList, addMethod, jValue);
-
-    // Clean up local references
-    //env->DeleteLocalRef(jKey);
-    //env->DeleteLocalRef(jValue);
 }
 
 // Helper method to add a string to a Java ArrayList
@@ -188,87 +166,84 @@ static inline void putHashMapHashMap(JNIEnv *env, jobject hashMap, const char *k
 
 std::unordered_map<long, rnllama::llama_rn_context *> context_map;
 
-struct CallbackContext {
-    JNIEnv * env;
-    jobject  thiz;
-    jmethodID sendProgressMethod;
-    unsigned current;
-};
-
+// Original JNI function: path-based
 JNIEXPORT jlong JNICALL
 Java_org_nehuatl_llamacpp_LlamaContext_initContext(
         JNIEnv *env,
         jobject thiz,
-        jstring model_path_str,
+        jstring model_path,
         jboolean embedding,
         jint n_ctx,
         jint n_batch,
         jint n_threads,
-        jint n_gpu_layers, // TODO: Support this
+        jint n_gpu_layers,
         jboolean use_mlock,
         jboolean use_mmap,
         jboolean vocab_only,
         jstring lora_str,
         jfloat lora_scaled,
         jfloat rope_freq_base,
-        jfloat rope_freq_scale
+        jfloat rope_freq_scale,
+        jstring mmproj_str,
+        jobjectArray image_paths
 ) {
     UNUSED(thiz);
+    const char *model_chars = env->GetStringUTFChars(model_path, nullptr);
 
     gpt_params defaultParams;
-
-    defaultParams.vocab_only = vocab_only;
-    if(vocab_only) {
-        defaultParams.warmup = false;
-    }
-
-    const char *model_path_chars = env->GetStringUTFChars(model_path_str, nullptr);
-    defaultParams.model = model_path_chars;
-
+    defaultParams.model = model_chars;
     defaultParams.embedding = embedding;
-
     defaultParams.n_ctx = n_ctx;
     defaultParams.n_batch = n_batch;
-
-    int max_threads = std::thread::hardware_concurrency();
-    // Use 2 threads by default on 4-core devices, 4 threads on more cores
-    int default_n_threads = max_threads == 4 ? 2 : min(4, max_threads);
-    defaultParams.cpuparams.n_threads = n_threads > 0 ? n_threads : default_n_threads;
-
     defaultParams.n_gpu_layers = n_gpu_layers;
-
     defaultParams.use_mlock = use_mlock;
     defaultParams.use_mmap = use_mmap;
+    defaultParams.vocab_only = vocab_only;
+
+    int max_threads = std::thread::hardware_concurrency();
+    int auto_threads = max_threads == 4 ? 2 : std::min(4, max_threads);
+    defaultParams.cpuparams.n_threads = n_threads > 0 ? n_threads : auto_threads;
 
     const char *lora_chars = env->GetStringUTFChars(lora_str, nullptr);
-    if (lora_chars != nullptr && lora_chars[0] != '\0') {
+    if (lora_chars && lora_chars[0] != '\0') {
         defaultParams.lora_adapters.push_back({lora_chars, lora_scaled});
-        defaultParams.use_mmap = false;
+    }
+
+    if (mmproj_str != nullptr) {
+        const char *mmproj_chars = env->GetStringUTFChars(mmproj_str, nullptr);
+        defaultParams.mmproj = mmproj_chars;
+        env->ReleaseStringUTFChars(mmproj_str, mmproj_chars);
+    }
+
+    if (image_paths != nullptr) {
+        jsize len = env->GetArrayLength(image_paths);
+        for (jsize i = 0; i < len; i++) {
+            jstring path_str = (jstring) env->GetObjectArrayElement(image_paths, i);
+            const char *path_chars = env->GetStringUTFChars(path_str, nullptr);
+            defaultParams.image.push_back(path_chars);
+            env->ReleaseStringUTFChars(path_str, path_chars);
+        }
     }
 
     defaultParams.rope_freq_base = rope_freq_base;
     defaultParams.rope_freq_scale = rope_freq_scale;
 
-
-
-
     auto llama = new rnllama::llama_rn_context();
-    bool is_model_loaded = llama->loadModel(defaultParams);
+    bool ok = llama->loadModel(defaultParams);
 
-    LOGI("[RNLlama] is_model_loaded %s", (is_model_loaded ? "true" : "false"));
-    if (is_model_loaded) {
-        context_map[(long) llama->ctx] = llama;
-    } else {
-        llama_free(llama->ctx);
-    }
-
-    env->ReleaseStringUTFChars(model_path_str, model_path_chars);
+    env->ReleaseStringUTFChars(model_path, model_chars);
     env->ReleaseStringUTFChars(lora_str, lora_chars);
 
+    if (!ok) {
+        llama_free(llama->ctx);
+        return 0;
+    }
+
+    context_map[(long) llama->ctx] = llama;
     return reinterpret_cast<jlong>(llama->ctx);
 }
 
-// New JNI function: same args as initContext but model represented by jint fd first
+// New JNI function: model represented by jint fd first
 JNIEXPORT jlong JNICALL
 Java_org_nehuatl_llamacpp_LlamaContext_initContextWithFd(
         JNIEnv *env,
@@ -285,7 +260,9 @@ Java_org_nehuatl_llamacpp_LlamaContext_initContextWithFd(
         jstring lora_str,
         jfloat lora_scaled,
         jfloat rope_freq_base,
-        jfloat rope_freq_scale
+        jfloat rope_freq_scale,
+        jint mmproj_fd,
+        jintArray image_fds
 ) {
     UNUSED(thiz);
 
@@ -334,6 +311,26 @@ Java_org_nehuatl_llamacpp_LlamaContext_initContextWithFd(
         defaultParams.use_mmap = false;
     }
 
+    // Handle Multimodal parameters (using Proc FD trick)
+    if (mmproj_fd >= 0) {
+        int dup_mmproj_fd = dup(mmproj_fd);
+        char mmproj_path[32];
+        snprintf(mmproj_path, 32, "/proc/self/fd/%d", dup_mmproj_fd);
+        defaultParams.mmproj = mmproj_path;
+    }
+
+    if (image_fds != nullptr) {
+        jsize len = env->GetArrayLength(image_fds);
+        jint *fds = env->GetIntArrayElements(image_fds, nullptr);
+        for (jsize i = 0; i < len; i++) {
+            int dup_img_fd = dup(fds[i]);
+            char img_path[32];
+            snprintf(img_path, 32, "/proc/self/fd/%d", dup_img_fd);
+            defaultParams.image.push_back(img_path);
+        }
+        env->ReleaseIntArrayElements(image_fds, fds, 0);
+    }
+
     defaultParams.rope_freq_base = rope_freq_base;
     defaultParams.rope_freq_scale = rope_freq_scale;
 
@@ -356,6 +353,8 @@ Java_org_nehuatl_llamacpp_LlamaContext_initContextWithFd(
     return reinterpret_cast<jlong>(llama->ctx);
 }
 
+// ... Rest of the functions (loadModelDetails, getFormattedChat, etc.) ...
+// Keep existing implementations below, just ensure they are within the extern "C" block
 JNIEXPORT jobject JNICALL
 Java_org_nehuatl_llamacpp_LlamaContext_loadModelDetails(
         JNIEnv *env,
@@ -407,41 +406,31 @@ Java_org_nehuatl_llamacpp_LlamaContext_getFormattedChat(
         jobject msg = env->GetObjectArrayElement(messages, i);
         jclass msgClass = env->GetObjectClass(msg);
 
-        // Use "get" instead of "getString" for a Map
         jmethodID getMethod = env->GetMethodID(msgClass, "get", "(Ljava/lang/Object;)Ljava/lang/Object;");
 
-        // Create Java strings for the keys
         jstring roleKey = env->NewStringUTF("role");
         jstring contentKey = env->NewStringUTF("content");
 
-        // Retrieve the role and content from the map using "get"
         jobject roleObj = env->CallObjectMethod(msg, getMethod, roleKey);
         jobject contentObj = env->CallObjectMethod(msg, getMethod, contentKey);
 
-        // Cast the returned objects to jstring
         jstring role_str = (jstring) roleObj;
         jstring content_str = (jstring) contentObj;
 
-        // Convert jstring to C-style strings
         const char *role = env->GetStringUTFChars(role_str, nullptr);
         const char *content = env->GetStringUTFChars(content_str, nullptr);
 
-        // Add the role and content to the chat vector
         chat.push_back({ role, content });
 
-        // Release memory for the jstrings
         env->ReleaseStringUTFChars(role_str, role);
         env->ReleaseStringUTFChars(content_str, content);
     }
 
-    // Get the chat template as a C-style string
     const char *tmpl_chars = env->GetStringUTFChars(chat_template, nullptr);
     std::string formatted_chat = llama_chat_apply_template(llama->model, tmpl_chars, chat, true);
 
-    // Release the chat template string
     env->ReleaseStringUTFChars(chat_template, tmpl_chars);
 
-    // Return the formatted chat as a jstring
     return env->NewStringUTF(formatted_chat.c_str());
 }
 
@@ -553,20 +542,17 @@ Java_org_nehuatl_llamacpp_LlamaContext_doCompletion(
         jobjectArray stop,
         jboolean ignore_eos,
         jobjectArray logit_bias,
-        jobject partialCompletionCallback // The Java class for callbacks
+        jobject partialCompletionCallback
 ) {
     UNUSED(thiz);
     auto llama = context_map[(long) context_ptr];
 
     llama->rewind();
 
-    //llama_reset_timings(llama->ctx);
-
     llama->params.prompt = env->GetStringUTFChars(prompt, nullptr);
     llama->params.sparams.seed = (seed == -1) ? time(NULL) : seed;
 
     int max_threads = std::thread::hardware_concurrency();
-    // Use 2 threads by default on 4-core devices, 4 threads on more cores
     int default_n_threads = max_threads == 4 ? 2 : min(4, max_threads);
     llama->params.cpuparams.n_threads = n_threads > 0 ? n_threads : default_n_threads;
 
@@ -608,7 +594,7 @@ Java_org_nehuatl_llamacpp_LlamaContext_doCompletion(
 
             llama_token tok = static_cast<llama_token>(doubleArray[0]);
             if (tok >= 0 && tok < n_vocab) {
-                if (doubleArray[1] != 0) {  // If the second element is not false (0)
+                if (doubleArray[1] != 0) {
                     sparams.logit_bias[tok].bias = doubleArray[1];
                 } else {
                     sparams.logit_bias[tok].bias = -INFINITY;
@@ -667,7 +653,6 @@ Java_org_nehuatl_llamacpp_LlamaContext_doCompletion(
 
         if (
                 stop_pos == std::string::npos ||
-                // Send rest of the text if we are at the end of the generation
                 (!llama->has_next_token && !is_stop_full && stop_pos > 0)
                 ) {
             const std::string to_send = llama->generated_text.substr(pos, std::string::npos);
@@ -691,9 +676,9 @@ Java_org_nehuatl_llamacpp_LlamaContext_doCompletion(
                 putArrayListHashMap(env, tokenResult, "completion_probabilities", tokenProbsToMap(env, llama, probs_output));
             }
 
-            jclass cb_class = env->GetObjectClass(partialCompletionCallback); // Get class of callback object
-            jmethodID onPartialCompletion = env->GetMethodID(cb_class, "onPartialCompletion", "(Ljava/util/Map;)V"); // Find method ID
-            env->CallVoidMethod(partialCompletionCallback, onPartialCompletion, tokenResult); // Call method
+            jclass cb_class = env->GetObjectClass(partialCompletionCallback);
+            jmethodID onPartialCompletion = env->GetMethodID(cb_class, "onPartialCompletion", "(Ljava/util/Map;)V");
+            env->CallVoidMethod(partialCompletionCallback, onPartialCompletion, tokenResult);
         }
     }
 

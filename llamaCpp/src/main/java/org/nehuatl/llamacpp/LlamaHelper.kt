@@ -22,7 +22,13 @@ class LlamaHelper(
     private var tokenCount = 0
     private var allText = ""
 
-    fun load(path: String, contextLength: Int, loaded: (Long) -> Unit) {
+    fun load(
+        path: String,
+        contextLength: Int,
+        mmprojPath: String? = null,
+        imagePaths: List<String> = emptyList(),
+        loaded: (Long) -> Unit
+    ) {
         currentContext?.let { id -> llama.releaseContext(id) }
         val actualPath = if (path.startsWith("content://")) {
             path
@@ -30,17 +36,19 @@ class LlamaHelper(
             path.removePrefix("file://")
         }
         val uri = actualPath.toUri()
-        val useMMap = uri.scheme != "content"
         val pfd = contentResolver.openFileDescriptor(uri, "r")
             ?: throw IllegalArgumentException("Cannot open URI")
         val fd = pfd.detachFd()
-        val config = mapOf(
+        val config = mutableMapOf<String, Any>(
             "model" to path,
             "model_fd" to fd,
             "use_mmap" to false,
             "use_mlock" to false,
             "n_ctx" to contextLength,
         )
+        mmprojPath?.let { config["mmproj"] = it }
+        config["images"] = imagePaths
+
         loadJob = scope.launch {
             Log.d("LlamaHelper", ">>> will start llama context with config: $config")
             val result = llama.startEngine(config) {

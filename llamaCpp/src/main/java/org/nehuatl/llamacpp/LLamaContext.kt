@@ -89,9 +89,8 @@ class LlamaContext(
         }
 
         this.context = initContextWithFd(
-            // String model,
+            // int modelFd,
             params["model_fd"] as Int,
-            //params["model"] as String,
             // boolean embedding,
             params["embedding"] as? Boolean ?: false,
             // int n_ctx,
@@ -100,13 +99,13 @@ class LlamaContext(
             params["n_batch"] as? Int ?: 512,
             // int n_threads,
             params["n_threads"] as? Int ?: 0,
-            // int n_gpu_layers, // TODO: Support this
+            // int n_gpu_layers,
             params["n_gpu_layers"] as? Int ?: 0,
             // boolean use_mlock,
             params["use_mlock"] as? Boolean ?: true,
             // boolean use_mmap,
             params["use_mmap"] as? Boolean ?: true,
-            //boolean vocab_only,
+            // boolean vocab_only,
             params["vocab_only"] as? Boolean ?: false,
             // String lora,
             params["lora"] as? String ?: "",
@@ -115,7 +114,11 @@ class LlamaContext(
             // float rope_freq_base,
             (params["rope_freq_base"] as? Double)?.toFloat() ?: 0.0f,
             // float rope_freq_scale
-            (params["rope_freq_scale"] as? Double)?.toFloat() ?: 0.0f
+            (params["rope_freq_scale"] as? Double)?.toFloat() ?: 0.0f,
+            // int mmproj_fd,
+            params["mmproj_fd"] as? Int ?: -1,
+            // int[] image_fds
+            (params["image_fds"] as? List<Int>)?.toIntArray() ?: intArrayOf()
         )
         this.modelDetails = loadModelDetails(this.context).toMutableMap()
     }
@@ -165,7 +168,6 @@ class LlamaContext(
     }
 
     fun completion(params: Map<String, Any>): Map<String, Any> {
-        //TODO: log->"completion start".v()
         if (!params.containsKey("prompt")) {
             throw IllegalArgumentException("Missing required parameter: prompt")
         }
@@ -173,60 +175,33 @@ class LlamaContext(
         val logitBias = params["logit_bias"] as? List<List<Double>>
         val logitBiasArray: Array<DoubleArray> = logitBias?.map { it.toDoubleArray() }?.toTypedArray() ?: emptyArray()
 
-        //TODO: log->"willInvoke doCompletion".v()
         val result = doCompletion(
             context,
-            // String prompt,
             params["prompt"] as String,
-            // String grammar,
             params["grammar"] as? String ?: "",
-            // float temperature,
             (params["temperature"] as? Double)?.toFloat() ?: 0.7f,
-            // int n_threads,
             params["n_threads"] as? Int ?: 0,
-            // int n_predict,
             params["n_predict"] as? Int ?: -1,
-            // int n_probs,
             params["n_probs"] as? Int ?: 0,
-            // int penalty_last_n,
             params["penalty_last_n"] as? Int ?: 64,
-            // float penalty_repeat,
             (params["penalty_repeat"] as? Double)?.toFloat() ?: 1.00f,
-            // float penalty_freq,
             (params["penalty_freq"] as? Double)?.toFloat() ?: 0.00f,
-            // float penalty_present,
             (params["penalty_present"] as? Double)?.toFloat() ?: 0.00f,
-            // float mirostat,
             (params["mirostat"] as? Double)?.toFloat() ?: 0.00f,
-            // float mirostat_tau,
             (params["mirostat_tau"] as? Double)?.toFloat() ?: 5.00f,
-            // float mirostat_eta,
             (params["mirostat_eta"] as? Double)?.toFloat() ?: 0.10f,
-            // boolean penalize_nl,
             params["penalize_nl"] as? Boolean ?: false,
-            // int top_k,
             params["top_k"] as? Int ?: 40,
-            // float top_p,
             (params["top_p"] as? Double)?.toFloat() ?: 0.95f,
-            // float min_p,
             (params["min_p"] as? Double)?.toFloat() ?: 0.05f,
-            // float xtc_t,
             (params["xtc_t"] as? Double)?.toFloat() ?: 0.00f,
-            // float xtc_p,
             (params["xtc_p"] as? Double)?.toFloat() ?: 0.00f,
-            // float tfs_z,
             (params["tfs_z"] as? Double)?.toFloat() ?: 1.00f,
-            // float typical_p,
             (params["typical_p"] as? Double)?.toFloat() ?: 1.00f,
-            // int seed,
             params["seed"] as? Int ?: -1,
-            // String[] stop,
             (params["stop"] as? List<String>)?.toTypedArray() ?: emptyArray(),
-            // boolean ignore_eos,
             params["ignore_eos"] as? Boolean ?: false,
-            // double[][] logit_bias,
             logitBiasArray,
-            // PartialCompletionCallback partial_completion_callback
             PartialCompletionCallback(
                 params["emit_partial_completion"] as? Boolean ?: false
             )
@@ -273,22 +248,6 @@ class LlamaContext(
         freeContext(context)
     }
 
-    private external fun initContext(
-        model: String,
-        embedding: Boolean,
-        n_ctx: Int,
-        n_batch: Int,
-        n_threads: Int,
-        n_gpu_layers: Int, // TODO: Support this
-        use_mlock: Boolean,
-        use_mmap: Boolean,
-        vocab_only: Boolean,
-        lora: String,
-        lora_scaled: Float,
-        rope_freq_base: Float,
-        rope_freq_scale: Float
-    ): Long
-
     private external fun initContextWithFd(
         modelFd: Int,
         embedding: Boolean,
@@ -302,7 +261,9 @@ class LlamaContext(
         lora: String?,
         lora_scaled: Float,
         rope_freq_base: Float,
-        rope_freq_scale: Float
+        rope_freq_scale: Float,
+        mmprojFd: Int,
+        imageFds: IntArray
     ): Long
 
     private external fun loadModelDetails(contextPtr: Long): Map<String, Any>
