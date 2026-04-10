@@ -22,23 +22,23 @@ This roadmap outlines the steps to modernize the native `llama.cpp` implementati
   - [x] Rewrite `jni.cpp` to match the new `llama_rn_context` and `common_params`.
   - [x] Fix missing `.hpp` files in sync script.
   - [x] Address API changes (`embeddings` -> `embedding`, `mmproj` path struct, etc.).
-  - [ ] Adapt Kotlin classes (`LlamaContext.kt`, `LlamaAndroid.kt`) to the new JNI signatures (if needed).
+  - [x] Adapt Kotlin classes (`LlamaContext.kt`, `LlamaAndroid.kt`) to the new JNI signatures.
 
 ## Phase 3: Updating Android Bindings
 - [x] Compare current JNI implementation (`jni.cpp`) with the latest from `cui-llama.rn` for reference.
-- [ ] Adapt `LlamaContext.kt` and `LlamaAndroid.kt` to match the new JNI signatures (Added parallel slot support?).
-- [ ] Update `LlamaHelper.kt` and `MainViewModel.kt` for per-prompt multimodal support.
-- [ ] Ensure proper support for File Descriptor (FD) passing in the new implementation.
+- [x] Update `LlamaHelper.kt` and `MainViewModel.kt` for per-prompt multimodal support.
+- [x] Ensure proper support for File Descriptor (FD) passing in the new implementation.
 
 ## Phase 4: Multimodal Implementation
 - [x] Implement the `llava` (multimodal) support using the latest `llama.cpp` patterns in JNI.
-- [ ] Update `LlamaHelper.kt` to handle the new multimodal loading sequence (passing images during prediction).
-- [ ] Update UI to allow selecting an image for the current prompt.
-- [ ] Verify image processing and projection handling in the native layer.
+- [x] Update `LlamaHelper.kt` to handle the new multimodal loading sequence (passing images during prediction).
+- [x] Update UI to allow selecting an image for the current prompt.
+- [x] Improved UI state feedback during long-running multimodal tasks.
+- [x] Verify image processing and projection handling in the native layer (Verified by user).
 
 ## Phase 5: Testing and Validation
-- [ ] Test with standard GGUF models.
-- [ ] Test with multimodal models (LLaVA) using the updated sample app.
+- [x] Test with standard GGUF models.
+- [x] Test with multimodal models (LLaVA) using the updated sample app.
 - [ ] Optimize performance and memory usage for Android.
 
 ## Constraints and Guidelines

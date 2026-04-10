@@ -202,7 +202,7 @@ inline mtmd_tokenize_result tokenizeWithMedia(llama_rn_context_mtmd *mtmd_wrappe
             LOG_INFO("[DEBUG] Loading media from file");
 
             // Check if file exists
-            FILE* file = fopen(media_path.c_str(), "rb");
+            FILE* file = lm_ggml_fopen(media_path.c_str(), "rb");
             if (file == nullptr) {
                 bitmaps.entries.clear();
                 throw std::runtime_error("File does not exist or cannot be opened");
@@ -393,6 +393,10 @@ inline void llama_rn_context_mtmd::processMedia(
     auto result = tokenizeWithMedia(this, full_prompt, media_paths);
 
     auto all_tokens = result.tokens;
+    LOG_INFO("[DEBUG] Processed tokens count: %zu", all_tokens.size());
+    for (size_t i = 0; i < std::min((size_t)10, all_tokens.size()); i++) {
+        LOG_INFO("[DEBUG] token[%zu] = %d", i, all_tokens[i]);
+    }
     auto chunks = result.chunks;
     auto chunk_pos = result.chunk_pos;
     auto chunk_pos_media = result.chunk_pos_media;

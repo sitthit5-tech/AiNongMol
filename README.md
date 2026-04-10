@@ -1,175 +1,102 @@
 # Kotlin-LlamaCpp
 
-### Implementing GGUF Local Inference into Android ARM Devices with EASE
+### Implementing GGUF Local Inference into Android Devices with EASE
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Optimized for Arm](https://img.shields.io/badge/Optimized_for-Arm-0091BD?logo=arm&logoColor=white)](https://www.arm.com/)
 
-**Native AI inference for Arm-based Android devices**
+**Native AI inference for Android devices**
 
-Run GGUF models directly on your Arm-powered Android device with optimized performance and zero cloud dependency!
+Run GGUF models directly on your Android device with optimized performance and zero cloud dependency!
 
-This is an Android binding for [llama.cpp](https://github.com/ggerganov/llama.cpp) written in Kotlin, designed specifically for native Android applications running on Arm architecture. Built from the ground up to leverage Arm CPU capabilities, this library brings efficient large language model inference to mobile devices. The project is inspired by [cui-llama.rn](https://github.com/Vali-98/cui-llama.rn) and [llama.cpp](https://github.com/ggerganov/llama.cpp): Inference of [LLaMA](https://arxiv.org/abs/2302.13971) model in pure C/C++, specifically tailored for Arm-based Android development in Kotlin.
-
-This is a very early alpha version and API may change in the future.
+This is an Android binding for [llama.cpp](https://github.com/ggerganov/llama.cpp) written in Kotlin, designed specifically for native Android applications. Built to leverage modern hardware capabilities, this library brings efficient large language model inference to mobile devices. The project is inspired by [cui-llama.rn](https://github.com/Vali-98/cui-llama.rn) and [llama.cpp](https://github.com/ggerganov/llama.cpp): Inference of [LLaMA](https://arxiv.org/abs/2302.13971) and multimodal models in pure C/C++, specifically tailored for native Android development in Kotlin.
 
 [![ko-fi](https://www.ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/P5P6149YRQ)
 
-## News
-- Content Resolver has been implemented for new versions of Android to allow local file access
-- Library has been updated to comply with 16kb pagination now enforced
+## Changelog
+### v0.4.0 (Latest)
+- **Modernized Core**: Native codebase synchronized with the latest `llama.cpp` upstream (via `cui-llama.rn`).
+- **Multimodal Support**: Full support for vision/multimodal models (e.g., LLaVA) using `mmproj` files.
+- **Improved File Handling**: Migrated to a robust File Descriptor (FD) passing mechanism, bypassing Android's scoped storage restrictions and `/proc/self/fd` limitations.
+- **Architecture Support**: Expanded support beyond ARM-only; optimized for 64-bit platforms (`arm64-v8a` and `x86_64`).
+- **Real-time Streaming**: Enhanced JNI streaming logic with robust UTF-8 buffering to prevent crashes during token generation.
+- **UI State Feedback**: Improved `LlamaHelper` to provide immediate feedback during long-running image analysis/projection phases.
 
-## Why On-Device AI on Arm?
+## Why On-Device AI?
 
-Most modern Android devices run on Arm processors, making Arm the dominant architecture for mobile AI applications. Kotlin-LlamaCpp is built specifically for this ecosystem, enabling:
+Modern Android devices (Snapdragon, MediaTek, Exynos, Tensor) now possess the power to run sophisticated AI models locally. Kotlin-LlamaCpp enables:
 
-- **True On-Device AI**: Run large language models entirely on your Arm-based phone or tablet—no internet required, complete privacy
-- **Arm-Optimized Performance**: Automatic detection and utilization of Arm CPU features (i8mm, dotprod) for hardware-accelerated inference
-- **Mobile-First Design**: Built from the ground up for Arm's power-efficient architecture, balancing performance with battery life
-- **Real-World Usability**: Context management and batch interruption designed for the constraints of mobile Arm processors
-
-The vast majority of Android devices today are powered by Arm processors (Snapdragon, MediaTek, Exynos, Tensor). This library is optimized specifically for this architecture, bringing desktop-class AI capabilities to the devices already in your users' pockets.
+- **True On-Device AI**: Run large language models entirely on your phone or tablet—no internet required, complete privacy.
+- **Hardware-Accelerated Inference**: Automatic detection and utilization of CPU features (i8mm, dotprod) for hardware-accelerated inference on ARM and x86.
+- **Mobile-First Design**: Context management and batch interruption designed for the constraints of mobile processors.
+- **Multimodal Capabilities**: Analyze images locally using multimodal projectors (`mmproj`).
 
 ## Features
 
-- **Native Arm Architecture Support**: Built for arm64-v8a with automatic CPU feature detection (i8mm and dotprod flags)
-- **Hardware-Accelerated Inference**: Leverages Arm-specific instruction sets for optimized matrix operations
-- **Efficient Mobile Inference**: Context Shift support from [kobold.cpp](https://github.com/LostRuins/koboldcpp) enables longer conversations without memory overflow
-- **Kotlin-First Design**: Helper class to handle initialization and context management seamlessly
-- **Flexible Control**: Support for stopping prompt processing between batches, crucial for responsive mobile UIs
-- **Progress Monitoring**: Real-time callback support for tracking inference progress
-- **Tokenizer Support**: Vocabulary-only mode with synchronous tokenizer functions
-- **Seamless Android Integration**: Works naturally with Android development workflows and lifecycle management
+- **Multi-Architecture Support**: Built for `arm64-v8a` and `x86_64` with automatic CPU feature detection.
+- **Multimodal Inference**: Support for LLaVA and other vision models with per-prompt image injection.
+- **Efficient Mobile Inference**: Context Shift support from [kobold.cpp](https://github.com/LostRuins/koboldcpp) enables longer conversations without memory overflow.
+- **Kotlin-First Design**: Helper class to handle initialization and context management seamlessly.
+- **Seamless Android Integration**: Uses `ContentResolver` and File Descriptors to work naturally with Android 11+ scoped storage.
 
 ## Demo App
-You can find a complete, ready-to-build demo application in the [`/app`](https://github.com/ljcamargo/kotlinllamacpp/tree/master/app) directory of this repository.
-The demo showcases how to integrate the library into a standard Android app, including model loading from local storage, handling inference in a ViewModel, and displaying generated text in a Jetpack Compose UI.
-
-<img src="https://github.com/ljcamargo/kotlinllamacpp/raw/master/app/src/main/ic_launcher-playstore.png" alt="Demo App Icon" width="128"/>
-
+You can find a complete, ready-to-build demo application in the [`/app`](https://github.com/ljcamargo/kotlinllamacpp/tree/master/app) directory.
+The demo showcases model loading, multimodal image selection, handling inference in a ViewModel, and displaying generated text in a Jetpack Compose UI.
 
 ## Installation
 
 Add the following to your project's `build.gradle`:
 ```gradle
 dependencies {
-    implementation 'io.github.ljcamargo:llamacpp-kotlin:0.2.0'
+    implementation 'io.github.ljcamargo:llamacpp-kotlin:0.4.0'
 }
 ```
-
-## Model Requirements
-
-You'll need a GGUF model file to use this library. You can:
-
-- Download pre-converted GGUF models from [HuggingFace](https://huggingface.co/search/full-text?q=GGUF&type=model)
-- Convert your own models following the [llama.cpp quantization guide](https://github.com/ggerganov/llama.cpp#prepare-and-quantize)
-
-Quantized models (Q4, Q5, Q8) work particularly well on Arm mobile processors, providing an excellent balance between model quality and inference speed.
 
 ## Usage
 
-Check this example ViewModel using LlamaHelper class for basic usage:
+### Basic Text Completion
 ```kotlin
-class MainViewModel: ViewModel(val contentResolver: ContentResolver) {
-
-    private val viewModelJob = SupervisorJob()
-    private val scope = CoroutineScope(Dispatchers.IO + viewModelJob)
-    
-    private val _llmFlow = MutableSharedFlow<LlamaHelper.LLMEvent>(
-        replay = 0,
-        extraBufferCapacity = 64,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST
-    )
-    val llmFlow: SharedFlow<LlamaHelper.LLMEvent> = _llmFlow.asSharedFlow()
-    
-    private val _generatedText = MutableStateFlow("")
-    val generatedText = _generatedText.asStateFlow()
-
-    private val llamaHelper by lazy {
-        LlamaHelper(
-            contentResolver = contentResolver, // <-- Recent android versions now require resolver to access local files
-            scope = scope,
-            sharedFlow = _llmFlow,
-        )
-    }
-
-    // load gguf model into memory
-    fun loadModel() {
-        llamaHelper.load(
-            path = "/sdcard/Download/llama.ggmlv3.q4_0.bin",
-            contextLength = 2048,
-        ) {
-            // MODEL SUCCESSFULLY LOADED (it: context id)
-            // TODO: Update your UI to allow prompts
-        }
-    }
-
-    // model should be loaded before submitting or an exception will be thrown
-    fun generate(prompt: String) {
-        scope.launch {
-            llamaHelper.predict(prompt)
-            llmFlow.collect { event ->
-                when (event) {
-                    is LlamaHelper.LLMEvent.Started -> {
-                        // Update your UI to show the gen started
-                    }
-                    is LlamaHelper.LLMEvent.Ongoing -> {
-                        // A new token has been generated, update your UI accordingly
-                        // vb.g. _generatedText.value += event.word
-                    }
-                    is LlamaHelper.LLMEvent.Done -> {
-                        // Update your UI to show the gen completed
-                        llamaHelper.stopPrediction()
-                    }
-                    is LlamaHelper.LLMEvent.Error -> {
-                        // Update your UI to show the gen error
-                        llamaHelper.stopPrediction()
-                    }
-                    else -> {}
-                }
-            }
-        }
-    }
-
-    // you can abort the model load or prediction in progress
-    fun abort() {
-        llamaHelper.abort()
-    }
-
-    // don't forget to release resources when your viewmodel is destroyed
-    override fun onCleared() {
-        super.onCleared()
-        llamaHelper.abort()
-        llamaHelper.release()
-    }
+// Initialize and load
+llamaHelper.load(
+    path = modelUriString, // e.g. from a file picker
+    contextLength = 2048,
+) {
+    // Model loaded!
 }
+
+// Generate
+llamaHelper.predict("Why is the sky blue?")
 ```
 
-You can also use LlamaContext.kt directly to handle several contexts or other complex features.
+### Multimodal (Image Processing)
+To use multimodal features, you need a base GGUF model and its corresponding `mmproj` file.
+```kotlin
+// Load with multimodal projector
+llamaHelper.load(
+    path = baseModelUri,
+    contextLength = 4096,
+    mmprojPath = mmprojUri // Pass the projector file here
+) {
+    // Multimodal context ready!
+}
 
-## Performance on Arm Architecture
+// Generate with an image
+llamaHelper.predict(
+    prompt = "Describe this image in detail:",
+    imagePath = selectedImageUri // Pass the image URI here
+)
+```
 
-Kotlin-LlamaCpp is optimized specifically for arm64-v8a, the architecture powering the vast majority of modern Android devices:
-
-- **Arm CPU Extensions**: Automatic detection and utilization of i8mm (integer matrix multiplication) and dotprod instructions provides significant performance improvements for AI workloads
-- **Memory Efficiency**: Designed to work within mobile device constraints while maintaining responsive performance
-- **Batch Interruption**: Critical for Arm mobile processors, allowing the UI to remain responsive during inference
-- **Power Efficiency**: Native Arm optimizations help balance inference performance with battery life—essential for mobile use cases
-- **64-bit Optimization**: Recommended arm64-v8a platform for better memory allocation and performance
-
-The library currently supports arm64-v8a android devices and platforms.
+## Native Code Maintenance
+The native C++ core is synchronized with the latest `llama.cpp` developments. For instructions on how to update or rebuild the native components, see the [llamaCpp README](llamaCpp/README.md).
 
 ## Contributing
-
 Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
-
 MIT
 
 ## Acknowledgments
-
-This project builds upon the work of several excellent projects:
+This project builds upon the work of:
 - [llama.cpp](https://github.com/ggerganov/llama.cpp) by Georgi Gerganov
-- [cui-llama.rn](https://github.com/Vali-98/cui-llama.rn)
+- [cui-llama.rn](https://github.com/Vali-98/cui-llama.rn) by Vali-98
 - [llama.rn](https://github.com/mybigday/llama.rn)

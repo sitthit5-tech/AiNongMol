@@ -1,5 +1,6 @@
 package org.nehuatl.sample
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonColors
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -34,7 +37,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -123,7 +129,7 @@ fun ChatScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("Image added: ${it.substringAfterLast("/")}", style = MaterialTheme.typography.bodySmall)
+                    Text("[Image]", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -171,28 +177,51 @@ private fun ModelPickerDialog(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
-                    "Setup Llama Model",
+                    "Select Model",
                     style = MaterialTheme.typography.headlineSmall
                 )
 
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Model (GGUF): ${currentModelPath?.substringAfterLast("/") ?: "Not selected"}")
+                    Text("GGUF Model")
+                    if (currentModelPath != null) Text(
+                        text = "[Model File]",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
                     Button(onClick = onPickModel, modifier = Modifier.fillMaxWidth()) {
-                        Text("Pick Model")
+                        Text(if (currentModelPath ==  null) "Pick A Model" else "Change Model")
                     }
                 }
 
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Mmproj: ${mmprojPath?.substringAfterLast("/") ?: "Not selected (optional)"}")
+                Column(
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        "(optional)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text("Multimodal projector (mmproj)")
+                    if (mmprojPath != null) Text(
+                        text = "[Projector File]",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
                     Button(onClick = onPickMmproj, modifier = Modifier.fillMaxWidth()) {
-                        Text("Pick Mmproj")
+                        Text(if (mmprojPath == null) "Pick Projector" else "Change Projector")
                     }
                 }
 
                 Button(
                     onClick = onLoad,
                     enabled = currentModelPath != null,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().padding(top=8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colorResource(R.color.purple_700)
+                    )
                 ) {
                     Text("Load Model")
                 }
@@ -200,7 +229,7 @@ private fun ModelPickerDialog(
                 if (onDismiss != null) {
                     TextButton(
                         onClick = onDismiss,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text("Cancel")
                     }
