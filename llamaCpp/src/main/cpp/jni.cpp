@@ -38,13 +38,24 @@ static inline jobject createHashMap(JNIEnv *env) {
 
 // Helper method to put a string into a Java HashMap
 static inline void putStringHashMap(JNIEnv *env, jobject hashMap, const char *key, const char *value) {
+    if (value == nullptr) return;
+    
     jclass hashMapClass = env->FindClass("java/util/HashMap");
     jmethodID putMethod = env->GetMethodID(hashMapClass, "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
 
     jstring jKey = env->NewStringUTF(key);
     jstring jValue = env->NewStringUTF(value);
+    
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        LOGW("putStringHashMap: Invalid UTF-8 for key %s", key);
+        jValue = env->NewStringUTF("");
+    }
 
     env->CallObjectMethod(hashMap, putMethod, jKey, jValue);
+    
+    env->DeleteLocalRef(jKey);
+    if (jValue) env->DeleteLocalRef(jValue);
 }
 
 // Helper method to put an int into a Java HashMap
@@ -54,12 +65,15 @@ static inline void putIntHashMap(JNIEnv *env, jobject hashMap, const char *key, 
 
     jstring jKey = env->NewStringUTF(key);
 
-    // Box the int value into a java.lang.Integer object
     jclass integerClass = env->FindClass("java/lang/Integer");
     jmethodID integerConstructor = env->GetMethodID(integerClass, "<init>", "(I)V");
     jobject jValue = env->NewObject(integerClass, integerConstructor, value);
 
     env->CallObjectMethod(hashMap, putMethod, jKey, jValue);
+    
+    env->DeleteLocalRef(jKey);
+    env->DeleteLocalRef(integerClass);
+    env->DeleteLocalRef(jValue);
 }
 
 // Helper method to put a double into a Java HashMap
@@ -69,12 +83,15 @@ static inline void putDoubleHashMap(JNIEnv *env, jobject hashMap, const char *ke
 
     jstring jKey = env->NewStringUTF(key);
 
-    // Box the double value into a java.lang.Double object
     jclass doubleClass = env->FindClass("java/lang/Double");
     jmethodID doubleConstructor = env->GetMethodID(doubleClass, "<init>", "(D)V");
     jobject jValue = env->NewObject(doubleClass, doubleConstructor, value);
 
     env->CallObjectMethod(hashMap, putMethod, jKey, jValue);
+    
+    env->DeleteLocalRef(jKey);
+    env->DeleteLocalRef(doubleClass);
+    env->DeleteLocalRef(jValue);
 }
 
 // Helper method to put a boolean into a Java HashMap
@@ -84,12 +101,15 @@ static inline void putBooleanHashMap(JNIEnv *env, jobject hashMap, const char *k
 
     jstring jKey = env->NewStringUTF(key);
 
-    // Box the boolean value into a java.lang.Boolean object
     jclass booleanClass = env->FindClass("java/lang/Boolean");
     jmethodID booleanConstructor = env->GetMethodID(booleanClass, "<init>", "(Z)V");
     jobject jValue = env->NewObject(booleanClass, booleanConstructor, value);
 
     env->CallObjectMethod(hashMap, putMethod, jKey, jValue);
+    
+    env->DeleteLocalRef(jKey);
+    env->DeleteLocalRef(booleanClass);
+    env->DeleteLocalRef(jValue);
 }
 
 // Helper method to create a Java ArrayList
@@ -105,12 +125,14 @@ static inline void addIntArrayList(JNIEnv *env, jobject arrayList, int value) {
     jclass arrayListClass = env->FindClass("java/util/ArrayList");
     jmethodID addMethod = env->GetMethodID(arrayListClass, "add", "(Ljava/lang/Object;)Z");
 
-    // Box the int value into a java.lang.Integer object
     jclass integerClass = env->FindClass("java/lang/Integer");
     jmethodID integerConstructor = env->GetMethodID(integerClass, "<init>", "(I)V");
     jobject jValue = env->NewObject(integerClass, integerConstructor, value);
 
     env->CallBooleanMethod(arrayList, addMethod, jValue);
+    
+    env->DeleteLocalRef(integerClass);
+    env->DeleteLocalRef(jValue);
 }
 
 // Helper method to add a double to a Java ArrayList
@@ -118,22 +140,32 @@ static inline void addDoubleArrayList(JNIEnv *env, jobject arrayList, double val
     jclass arrayListClass = env->FindClass("java/util/ArrayList");
     jmethodID addMethod = env->GetMethodID(arrayListClass, "add", "(Ljava/lang/Object;)Z");
 
-    // Box the double value into a java.lang.Double object
     jclass doubleClass = env->FindClass("java/lang/Double");
     jmethodID doubleConstructor = env->GetMethodID(doubleClass, "<init>", "(D)V");
     jobject jValue = env->NewObject(doubleClass, doubleConstructor, value);
 
     env->CallBooleanMethod(arrayList, addMethod, jValue);
+    
+    env->DeleteLocalRef(doubleClass);
+    env->DeleteLocalRef(jValue);
 }
 
 // Helper method to add a string to a Java ArrayList
 static inline void addStringArrayList(JNIEnv *env, jobject arrayList, const char *value) {
+    if (value == nullptr) return;
+    
     jclass arrayListClass = env->FindClass("java/util/ArrayList");
     jmethodID addMethod = env->GetMethodID(arrayListClass, "add", "(Ljava/lang/Object;)Z");
 
     jstring jValue = env->NewStringUTF(value);
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        jValue = env->NewStringUTF("");
+    }
 
     env->CallBooleanMethod(arrayList, addMethod, jValue);
+    
+    if (jValue) env->DeleteLocalRef(jValue);
 }
 
 // Helper method to add a HashMap to a Java ArrayList
@@ -152,6 +184,8 @@ static inline void putArrayListHashMap(JNIEnv *env, jobject hashMap, const char 
     jstring jKey = env->NewStringUTF(key);
 
     env->CallObjectMethod(hashMap, putMethod, jKey, value);
+    
+    env->DeleteLocalRef(jKey);
 }
 
 // Helper method to put a Java HashMap into a Java HashMap
@@ -162,14 +196,11 @@ static inline void putHashMapHashMap(JNIEnv *env, jobject hashMap, const char *k
     jstring jKey = env->NewStringUTF(key);
 
     env->CallObjectMethod(hashMap, putMethod, jKey, value);
+    
+    env->DeleteLocalRef(jKey);
 }
 
 std::unordered_map<long, rnllama::llama_rn_context *> context_map;
-
-struct session_params {
-    std::vector<std::string> image_paths;
-};
-std::unordered_map<long, session_params> session_map;
 
 JNIEXPORT jlong JNICALL
 Java_org_nehuatl_llamacpp_LlamaContext_initContextWithFd(
@@ -209,6 +240,7 @@ Java_org_nehuatl_llamacpp_LlamaContext_initContextWithFd(
              model_fd, errno, strerror(errno));
         return 0;
     }
+    close(model_fd);
 
     char fdString[32];
     snprintf(fdString, 32, "%d", dupfd);
@@ -236,24 +268,11 @@ Java_org_nehuatl_llamacpp_LlamaContext_initContextWithFd(
         int dup_mmproj_fd = dup(mmproj_fd);
         if (dup_mmproj_fd != -1) {
             char mmproj_path[32];
-            snprintf(mmproj_path, 32, "/proc/self/fd/%d", dup_mmproj_fd);
+            snprintf(mmproj_path, 32, "%d", dup_mmproj_fd);
             defaultParams.mmproj.path = mmproj_path;
+            LOGI("mmproj set to FD: %s", defaultParams.mmproj.path.c_str());
         }
-    }
-
-    std::vector<std::string> images;
-    if (image_fds != nullptr) {
-        jsize len = env->GetArrayLength(image_fds);
-        jint *fds = env->GetIntArrayElements(image_fds, nullptr);
-        for (jsize i = 0; i < len; i++) {
-            int dup_img_fd = dup(fds[i]);
-            if (dup_img_fd != -1) {
-                char img_path[32];
-                snprintf(img_path, 32, "/proc/self/fd/%d", dup_img_fd);
-                images.push_back(img_path);
-            }
-        }
-        env->ReleaseIntArrayElements(image_fds, fds, 0);
+        close(mmproj_fd);
     }
 
     defaultParams.rope_freq_base = rope_freq_base;
@@ -265,9 +284,11 @@ Java_org_nehuatl_llamacpp_LlamaContext_initContextWithFd(
     if (ok) {
         context_map[(long) llama->ctx] = llama;
         if (!defaultParams.mmproj.path.empty()) {
-            llama->initMultimodal(defaultParams.mmproj.path, n_gpu_layers > 0);
+            LOGI("Initializing multimodal with mmproj: %s", defaultParams.mmproj.path.c_str());
+            bool mm_ok = llama->initMultimodal(defaultParams.mmproj.path, n_gpu_layers > 0);
+            LOGI("Multimodal initialization result: %s", mm_ok ? "success" : "failed");
+            LOGI("Context multimodal enabled check: %s", llama->isMultimodalEnabled() ? "yes" : "no");
         }
-        session_map[(long) llama->ctx] = { images };
     } else {
         delete llama;
     }
@@ -322,8 +343,6 @@ Java_org_nehuatl_llamacpp_LlamaContext_getFormattedChat(
     UNUSED(thiz);
     auto it = context_map.find((long) context_ptr);
     if (it == context_map.end()) return nullptr;
-    // auto llama = it->second;
-
     return env->NewStringUTF(""); 
 }
 
@@ -408,6 +427,7 @@ Java_org_nehuatl_llamacpp_LlamaContext_doCompletion(
         jobjectArray stop,
         jboolean ignore_eos,
         jobjectArray logit_bias,
+        jintArray image_fds,
         jobject partialCompletionCallback
 ) {
     UNUSED(thiz);
@@ -432,21 +452,55 @@ Java_org_nehuatl_llamacpp_LlamaContext_doCompletion(
 
     llama->completion->initSampling();
     
-    // Pass images from session map
-    llama->completion->loadPrompt(session_map[(long)llama->ctx].image_paths);
+    std::vector<std::string> images;
+    if (image_fds != nullptr) {
+        jsize len = env->GetArrayLength(image_fds);
+        jint *fds = env->GetIntArrayElements(image_fds, nullptr);
+        for (jsize i = 0; i < len; i++) {
+            int dup_img_fd = dup(fds[i]);
+            if (dup_img_fd != -1) {
+                char img_path[32];
+                snprintf(img_path, 32, "/proc/self/fd/%d", dup_img_fd);
+                images.push_back(img_path);
+            }
+            close(fds[i]);
+        }
+        env->ReleaseIntArrayElements(image_fds, fds, 0);
+    }
+    
+    LOGI("doCompletion: images=%zu, multimodal_enabled=%s", images.size(), llama->isMultimodalEnabled() ? "yes" : "no");
+    
+    try {
+        llama->completion->loadPrompt(images);
+        llama->completion->beginCompletion();
 
-    jclass cb_class = env->GetObjectClass(partialCompletionCallback);
-    jmethodID onPartialCompletion = env->GetMethodID(cb_class, "onPartialCompletion", "(Ljava/util/Map;)V");
+        jclass cb_class = env->GetObjectClass(partialCompletionCallback);
+        jmethodID onPartialCompletion = env->GetMethodID(cb_class, "onPartialCompletion", "(Ljava/util/Map;)V");
 
-    while (llama->completion->has_next_token && !llama->completion->is_interrupted) {
-        auto token_output = llama->completion->doCompletion();
-        if (token_output.tok == -1) break;
+        size_t sent_count = 0;
+        while (llama->completion->has_next_token && !llama->completion->is_interrupted) {
+            auto token_output = llama->completion->doCompletion();
+            if (token_output.tok == -1) break;
 
-        std::string token_text = common_token_to_piece(llama->ctx, token_output.tok);
+            if (llama->completion->incomplete) continue;
+
+            size_t pos = std::min(sent_count, llama->completion->generated_text.size());
+            std::string to_send = llama->completion->generated_text.substr(pos);
+            sent_count += to_send.size();
+
+            if (!to_send.empty()) {
+                auto tokenResult = createHashMap(env);
+                putStringHashMap(env, tokenResult, "token", to_send.c_str());
+                env->CallVoidMethod(partialCompletionCallback, onPartialCompletion, tokenResult);
+                env->DeleteLocalRef(tokenResult);
+            }
+        }
         
-        auto tokenResult = createHashMap(env);
-        putStringHashMap(env, tokenResult, "token", token_text.c_str());
-        env->CallVoidMethod(partialCompletionCallback, onPartialCompletion, tokenResult);
+        llama->completion->endCompletion();
+    } catch (const std::exception& e) {
+        LOGW("doCompletion: Caught exception: %s", e.what());
+    } catch (...) {
+        LOGW("doCompletion: Caught unknown exception");
     }
 
     return createHashMap(env);
@@ -511,7 +565,13 @@ Java_org_nehuatl_llamacpp_LlamaContext_detokenize(
     env->ReleaseIntArrayElements(tokens, tokens_ptr, 0);
 
     auto text = rnllama::tokens_to_str(llama->ctx, toks.cbegin(), toks.cend());
-    return env->NewStringUTF(text.c_str());
+    
+    jstring jText = env->NewStringUTF(text.c_str());
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        jText = env->NewStringUTF("");
+    }
+    return jText;
 }
 
 JNIEXPORT jboolean JNICALL
@@ -545,7 +605,7 @@ Java_org_nehuatl_llamacpp_LlamaContext_embedding(
         }
         return list;
     }
-    return createHashMap(env);
+    return createArrayList(env);
 }
 
 JNIEXPORT jstring JNICALL
@@ -578,7 +638,6 @@ Java_org_nehuatl_llamacpp_LlamaContext_freeContext(
     if (it == context_map.end()) return;
     auto llama = it->second;
     context_map.erase((long) llama->ctx);
-    session_map.erase((long) llama->ctx);
     delete llama;
 }
 

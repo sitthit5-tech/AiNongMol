@@ -66,10 +66,11 @@ class MainActivity : ComponentActivity() {
                         viewModel = viewModel,
                         currentModelPath = modelPath,
                         mmprojPath = mmprojPath,
-                        imagePath = imagePath,
                         onPickModel = { modelPickerLauncher.launch(arrayOf("*/*")) },
                         onPickMmproj = { mmprojPickerLauncher.launch(arrayOf("*/*")) },
-                        onPickImage = { imagePickerLauncher.launch(arrayOf("image/*")) }
+                        onPickImage = { imagePickerLauncher.launch(arrayOf("image/*")) },
+                        imagePath = imagePath,
+                        onImageUsed = { imagePath = null }
                     )
                 }
             }

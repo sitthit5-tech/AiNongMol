@@ -11,10 +11,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -40,10 +45,11 @@ fun ChatScreen(
     viewModel: MainViewModel,
     currentModelPath: String?,
     mmprojPath: String?,
-    imagePath: String?,
     onPickModel: () -> Unit,
     onPickMmproj: () -> Unit,
-    onPickImage: () -> Unit
+    onPickImage: () -> Unit,
+    onImageUsed: () -> Unit,
+    imagePath: String? = null // Passed from MainActivity
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val generatedText by viewModel.generatedText.collectAsStateWithLifecycle()
@@ -70,14 +76,12 @@ fun ChatScreen(
         ModelPickerDialog(
             currentModelPath = currentModelPath,
             mmprojPath = mmprojPath,
-            imagePath = imagePath,
             onPickModel = onPickModel,
             onPickMmproj = onPickMmproj,
-            onPickImage = onPickImage,
             onLoad = {
                 showModelDialog = false
                 if (currentModelPath != null) {
-                    viewModel.loadModel(currentModelPath, mmprojPath, imagePath)
+                    viewModel.loadModel(currentModelPath, mmprojPath)
                 }
             },
             onDismiss = if (currentModelPath != null) {
@@ -108,6 +112,22 @@ fun ChatScreen(
                 .padding(horizontal = 16.dp)
         )
 
+        // Image indicator if selected
+        imagePath?.let {
+            Card(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Row(
+                    modifier = Modifier.padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Image added: ${it.substringAfterLast("/")}", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+
         // Prompt input stays at bottom
         PromptInput(
             prompt = promptInput,
@@ -115,14 +135,16 @@ fun ChatScreen(
             onGenerate = {
                 if (state.canGenerate() && promptInput.isNotBlank()) {
                     keyboardController?.hide()
-                    viewModel.generate(promptInput)
+                    viewModel.generate(promptInput, imagePath)
                     promptInput = ""
+                    onImageUsed()
                 }
             },
             onAbort = {
                 keyboardController?.hide()
                 viewModel.abort()
             },
+            onPickImage = onPickImage,
             enabled = state.canGenerate(),
             isGenerating = state.isGenerating(),
             focusRequester = focusRequester,
@@ -135,10 +157,8 @@ fun ChatScreen(
 private fun ModelPickerDialog(
     currentModelPath: String?,
     mmprojPath: String?,
-    imagePath: String?,
     onPickModel: () -> Unit,
     onPickMmproj: () -> Unit,
-    onPickImage: () -> Unit,
     onLoad: () -> Unit,
     onDismiss: (() -> Unit)?
 ) {
@@ -151,7 +171,7 @@ private fun ModelPickerDialog(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
-                    "Setup Multimodal Model",
+                    "Setup Llama Model",
                     style = MaterialTheme.typography.headlineSmall
                 )
 
@@ -166,13 +186,6 @@ private fun ModelPickerDialog(
                     Text("Mmproj: ${mmprojPath?.substringAfterLast("/") ?: "Not selected (optional)"}")
                     Button(onClick = onPickMmproj, modifier = Modifier.fillMaxWidth()) {
                         Text("Pick Mmproj")
-                    }
-                }
-
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Image: ${imagePath?.substringAfterLast("/") ?: "Not selected (optional)"}")
-                    Button(onClick = onPickImage, modifier = Modifier.fillMaxWidth()) {
-                        Text("Pick Image")
                     }
                 }
 
@@ -307,6 +320,7 @@ private fun PromptInput(
     onPromptChange: (String) -> Unit,
     onGenerate: () -> Unit,
     onAbort: () -> Unit,
+    onPickImage: () -> Unit,
     enabled: Boolean,
     isGenerating: Boolean,
     focusRequester: FocusRequester,
@@ -314,8 +328,13 @@ private fun PromptInput(
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
+        IconButton(onClick = onPickImage, enabled = enabled && !isGenerating) {
+            Icon(Icons.Default.Add, contentDescription = "Add image")
+        }
+
         TextField(
             value = prompt,
             onValueChange = onPromptChange,

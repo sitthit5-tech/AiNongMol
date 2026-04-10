@@ -39,19 +39,17 @@ class MainViewModel(val contentResolver: ContentResolver): ViewModel() {
         )
     }
 
-    fun loadModel(path: String, mmprojPath: String? = null, imagePath: String? = null) {
+    fun loadModel(path: String, mmprojPath: String? = null) {
         if (_state.value is GenerationState.Generating) {
             Log.w("MainViewModel", "Cannot load model while generating")
             return
         }
         _state.value = GenerationState.LoadingModel
         try {
-            val imagePaths = if (imagePath != null) listOf(imagePath) else emptyList()
             llamaHelper.load(
                 path = path,
                 contextLength = 2048,
-                mmprojPath = mmprojPath,
-                imagePaths = imagePaths
+                mmprojPath = mmprojPath
             ) {
                 Log.i("MainViewModel", "Model loaded successfully")
                 _state.value = GenerationState.ModelLoaded(path)
@@ -62,14 +60,15 @@ class MainViewModel(val contentResolver: ContentResolver): ViewModel() {
         }
     }
 
-    fun generate(prompt: String) {
+    fun generate(prompt: String, imagePath: String? = null) {
         if (!_state.value.canGenerate()) {
             Log.w("MainViewModel", "Cannot generate in current state: ${_state.value}")
             return
         }
 
         scope.launch {
-            llamaHelper.predict(prompt)
+            Log.d("MainViewModel", "Generating with image: $imagePath")
+            llamaHelper.predict(prompt, imagePath)
             llmFlow.collect { event ->
                 when (event) {
                     is LlamaHelper.LLMEvent.Started -> {

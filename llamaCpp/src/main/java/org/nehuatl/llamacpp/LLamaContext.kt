@@ -209,6 +209,7 @@ class LlamaContext(
             (params["stop"] as? List<String>)?.toTypedArray() ?: emptyArray(),
             params["ignore_eos"] as? Boolean ?: false,
             logitBiasArray,
+            (params["image_fds"] as? List<Int>)?.toIntArray() ?: intArrayOf(),
             PartialCompletionCallback(
                 params["emit_partial_completion"] as? Boolean ?: false
             )
@@ -308,6 +309,7 @@ class LlamaContext(
         stop: Array<String>,
         ignore_eos: Boolean,
         logit_bias: Array<DoubleArray>,
+        imageFds: IntArray,
         partial_completion_callback: PartialCompletionCallback
     ): Map<String, Any>
 

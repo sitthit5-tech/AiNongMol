@@ -26,7 +26,6 @@ class LlamaHelper(
         path: String,
         contextLength: Int,
         mmprojPath: String? = null,
-        imagePaths: List<String> = emptyList(),
         loaded: (Long) -> Unit
     ) {
         currentContext?.let { id -> llama.releaseContext(id) }
@@ -35,7 +34,7 @@ class LlamaHelper(
             val modelUri = Uri.parse(path)
             Log.d("LlamaHelper", ">>> Opening model FD for URI: $modelUri")
             
-            // Explicitly check readability and size
+            // Explicitly check readability
             contentResolver.openInputStream(modelUri)?.use { input ->
                 val firstByte = input.read()
                 val size = contentResolver.openFileDescriptor(modelUri, "r")?.use { it.statSize } ?: -1
@@ -75,19 +74,6 @@ class LlamaHelper(
                 }
             }
 
-            val imageFds = mutableListOf<Int>()
-            for (imgPath in imagePaths) {
-                val imgUri = Uri.parse(imgPath)
-                Log.d("LlamaHelper", ">>> Opening image FD for URI: $imgUri")
-                val imgPfd = contentResolver.openFileDescriptor(imgUri, "r")
-                if (imgPfd != null) {
-                    val imgFd = imgPfd.detachFd()
-                    imageFds.add(imgFd)
-                    Log.d("LlamaHelper", ">>> Image FD: $imgFd")
-                }
-            }
-            config["image_fds"] = imageFds
-
             loadJob = scope.launch {
                 Log.d("LlamaHelper", ">>> will start llama context with config: $config")
                 val result = try {
@@ -119,18 +105,39 @@ class LlamaHelper(
         }
     }
 
-    fun predict(prompt: String, partialCompletion: Boolean = true) {
+    fun predict(prompt: String, imagePath: String? = null, partialCompletion: Boolean = true) {
         val context = currentContext ?: throw Exception("Model was not loaded yet")
         val startTime = System.currentTimeMillis()
         tokenCount = 0
         allText = ""
+        
+        val params = mutableMapOf<String, Any>(
+            "prompt" to prompt,
+            "emit_partial_completion" to partialCompletion,
+        )
+        
+        imagePath?.let {
+            try {
+                val imgUri = Uri.parse(it)
+                Log.d("LlamaHelper", ">>> Opening image FD for URI: $imgUri")
+                contentResolver.openFileDescriptor(imgUri, "r")?.use { pfd ->
+                    // Since we want to pass the FD to JNI, we should detach it if needed,
+                    // but here we might be able to just pass the FD number if it stays open
+                    // for the duration of the call.
+                    // Actually, detachFd() is safer.
+                    val imgFd = pfd.detachFd()
+                    params["image_fds"] = listOf(imgFd)
+                    Log.d("LlamaHelper", ">>> Image FD added to params: $imgFd")
+                }
+            } catch (e: Exception) {
+                Log.e("LlamaHelper", "Failed to open image FD", e)
+            }
+        }
+
         completionJob = scope.launch {
             llama.launchCompletion(
                 id = context,
-                params = mapOf(
-                    "prompt" to prompt,
-                    "emit_partial_completion" to partialCompletion,
-                )
+                params = params
             )
             val duration = System.currentTimeMillis() - startTime
             sharedFlow.tryEmit(LLMEvent.Done(allText, tokenCount, duration))
