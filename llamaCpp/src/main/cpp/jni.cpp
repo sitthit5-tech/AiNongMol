@@ -441,7 +441,6 @@ Java_org_nehuatl_llamacpp_LlamaContext_doCompletion(
 
     const char* prompt_chars = env->GetStringUTFChars(prompt, nullptr);
     llama->params.prompt = prompt_chars;
-    env->ReleaseStringUTFChars(prompt, prompt_chars);
 
     llama->params.sampling.seed = (seed == -1) ? time(NULL) : seed;
     llama->params.sampling.temp = temperature;
@@ -460,7 +459,7 @@ Java_org_nehuatl_llamacpp_LlamaContext_doCompletion(
             int dup_img_fd = dup(fds[i]);
             if (dup_img_fd != -1) {
                 char img_path[32];
-                snprintf(img_path, 32, "/proc/self/fd/%d", dup_img_fd);
+                snprintf(img_path, 32, "%d", dup_img_fd);
                 images.push_back(img_path);
             }
             close(fds[i]);
@@ -468,7 +467,7 @@ Java_org_nehuatl_llamacpp_LlamaContext_doCompletion(
         env->ReleaseIntArrayElements(image_fds, fds, 0);
     }
     
-    LOGI("doCompletion: images=%zu, multimodal_enabled=%s", images.size(), llama->isMultimodalEnabled() ? "yes" : "no");
+    LOGI("doCompletion: prompt='%s', images=%zu, multimodal_enabled=%s", prompt_chars, images.size(), llama->isMultimodalEnabled() ? "yes" : "no");
     
     try {
         llama->completion->loadPrompt(images);
@@ -503,6 +502,7 @@ Java_org_nehuatl_llamacpp_LlamaContext_doCompletion(
         LOGW("doCompletion: Caught unknown exception");
     }
 
+    env->ReleaseStringUTFChars(prompt, prompt_chars);
     return createHashMap(env);
 }
 
@@ -595,16 +595,17 @@ Java_org_nehuatl_llamacpp_LlamaContext_embedding(
 
     const char *text_chars = env->GetStringUTFChars(text, nullptr);
     llama->params.prompt = text_chars;
-    env->ReleaseStringUTFChars(text, text_chars);
 
     if (llama->completion) {
         auto result = llama->completion->embedding(llama->params);
+        env->ReleaseStringUTFChars(text, text_chars);
         jobject list = createArrayList(env);
         for (const auto &val : result) {
             addDoubleArrayList(env, list, (double)val);
         }
         return list;
     }
+    env->ReleaseStringUTFChars(text, text_chars);
     return createArrayList(env);
 }
 
