@@ -35,10 +35,11 @@ class LlamaHelper(
             val modelUri = Uri.parse(path)
             Log.d("LlamaHelper", ">>> Opening model FD for URI: $modelUri")
             
-            // Explicitly check readability
+            // Explicitly check readability and size
             contentResolver.openInputStream(modelUri)?.use { input ->
                 val firstByte = input.read()
-                Log.d("LlamaHelper", ">>> Model is readable, first byte: $firstByte")
+                val size = contentResolver.openFileDescriptor(modelUri, "r")?.use { it.statSize } ?: -1
+                Log.d("LlamaHelper", ">>> Model is readable, first byte: $firstByte, size: $size")
             } ?: Log.e("LlamaHelper", ">>> Model is NOT readable via openInputStream")
 
             val modelPfd = contentResolver.openFileDescriptor(modelUri, "r")

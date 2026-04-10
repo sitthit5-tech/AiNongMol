@@ -54,6 +54,11 @@ static std::vector<const char *> g_col = {
     "",
 };
 
+#if defined(__ANDROID__)
+#include <android/log.h>
+#define LOG_TAG "RNLLAMA_LOG_NATIVE"
+#endif
+
 struct gpt_log_entry {
     enum lm_ggml_log_level level;
 
@@ -67,6 +72,20 @@ struct gpt_log_entry {
     bool is_end;
 
     void print(FILE * file = nullptr) const {
+#if defined(__ANDROID__)
+        if (level == LM_GGML_LOG_LEVEL_DEBUG && gpt_log_verbosity_thold < LOG_DEFAULT_DEBUG) {
+            return;
+        }
+        int priority = ANDROID_LOG_INFO;
+        switch (level) {
+            case LM_GGML_LOG_LEVEL_INFO: priority = ANDROID_LOG_INFO; break;
+            case LM_GGML_LOG_LEVEL_WARN: priority = ANDROID_LOG_WARN; break;
+            case LM_GGML_LOG_LEVEL_ERROR: priority = ANDROID_LOG_ERROR; break;
+            case LM_GGML_LOG_LEVEL_DEBUG: priority = ANDROID_LOG_DEBUG; break;
+            default: priority = ANDROID_LOG_INFO; break;
+        }
+        __android_log_print(priority, LOG_TAG, "%s", msg.data());
+#else
         FILE * fcur = file;
         if (!fcur) {
             // stderr displays DBG messages only when their verbosity level is not higher than the threshold
@@ -111,6 +130,7 @@ struct gpt_log_entry {
         }
 
         fflush(fcur);
+#endif
     }
 };
 

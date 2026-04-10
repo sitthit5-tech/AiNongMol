@@ -836,11 +836,12 @@ struct llama_init_result llama_init_from_gpt_params(gpt_params & params) {
     } else if (!params.model_url.empty()) {
         model = llama_load_model_from_url(params.model_url.c_str(), params.model.c_str(), params.hf_token.c_str(), mparams);
     } else {
+        LOG_INF("%s: attempting to load model from file/fd '%s'\n", __func__, params.model.c_str());
         model = llama_load_model_from_file(params.model.c_str(), mparams);
     }
 
     if (model == NULL) {
-        LOG_ERR("%s: failed to load model '%s'\n", __func__, params.model.c_str());
+        LOG_ERR("%s: failed to load model '%s'. check if the file is a valid GGUF and the architecture is supported.\n", __func__, params.model.c_str());
         return iparams;
     }
 

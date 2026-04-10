@@ -264,6 +264,7 @@ Java_org_nehuatl_llamacpp_LlamaContext_initContextWithFd(
         jint mmproj_fd,
         jintArray image_fds
 ) {
+    LOGI(">>>> HERE!!!!");
     UNUSED(thiz);
 
     gpt_params defaultParams;
@@ -316,6 +317,7 @@ Java_org_nehuatl_llamacpp_LlamaContext_initContextWithFd(
 
     // Handle Multimodal parameters (using Proc FD trick)
     if (mmproj_fd >= 0) {
+        LOGI(">>>> IS MULTIMODAL!!!!");
         int dup_mmproj_fd = dup(mmproj_fd);
         if (dup_mmproj_fd != -1) {
             char mmproj_path[32];
@@ -325,6 +327,7 @@ Java_org_nehuatl_llamacpp_LlamaContext_initContextWithFd(
     }
 
     if (image_fds != nullptr) {
+        LOGI(">>>> HAS IMAGE!!!!");
         jsize len = env->GetArrayLength(image_fds);
         jint *fds = env->GetIntArrayElements(image_fds, nullptr);
         for (jsize i = 0; i < len; i++) {
@@ -341,8 +344,11 @@ Java_org_nehuatl_llamacpp_LlamaContext_initContextWithFd(
     defaultParams.rope_freq_base = rope_freq_base;
     defaultParams.rope_freq_scale = rope_freq_scale;
 
+    LOGI(">>>> WILL LOAD MODEL!!!!");
     auto llama = new rnllama::llama_rn_context();
     bool ok = llama->loadModel(defaultParams);
+
+    LOGI(">>>> LOADED MODEL????");
 
     // model loaded — context is valid
     if (ok) {
