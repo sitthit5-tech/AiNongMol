@@ -220,7 +220,7 @@ private fun ModelPickerDialog(
                     enabled = currentModelPath != null,
                     modifier = Modifier.fillMaxWidth().padding(top=8.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = colorResource(R.color.purple_700)
+                        containerColor = colorResource(R.color.teal_700)
                     )
                 ) {
                     Text("Load Model")
