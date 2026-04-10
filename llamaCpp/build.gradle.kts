@@ -65,7 +65,7 @@ android {
         consumerProguardFiles("consumer-rules.pro")
         externalNativeBuild {
             cmake {
-                abiFilters.add("arm64-v8a")
+                abiFilters.addAll(listOf("arm64-v8a", "x86_64"))
                 //abiFilters(*nativeArchitectures().toTypedArray())
                 arguments += listOf(
                     "-DLLAMA_BUILD_COMMON=ON",
@@ -76,7 +76,7 @@ android {
         }
         ndk {
             //noinspection ChromeOsAbiSupport
-            abiFilters.add("arm64-v8a")
+            abiFilters.addAll(listOf("arm64-v8a", "x86_64"))
         }
     }
     /*buildFeatures {
