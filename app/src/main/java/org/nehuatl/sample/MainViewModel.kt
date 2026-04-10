@@ -68,6 +68,15 @@ class MainViewModel(val contentResolver: ContentResolver): ViewModel() {
 
         scope.launch {
             Log.d("MainViewModel", "Generating with image: $imagePath")
+            
+            // Set initial generating state immediately
+            _state.value = GenerationState.Generating(
+                prompt = prompt,
+                startTime = System.currentTimeMillis(),
+                tokensGenerated = 0
+            )
+            _generatedText.value = ""
+
             llamaHelper.predict(prompt, imagePath)
             llmFlow.collect { event ->
                 when (event) {

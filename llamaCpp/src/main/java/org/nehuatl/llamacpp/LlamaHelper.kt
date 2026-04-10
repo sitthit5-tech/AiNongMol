@@ -135,6 +135,7 @@ class LlamaHelper(
         }
 
         completionJob = scope.launch {
+            sharedFlow.tryEmit(LLMEvent.Started(prompt))
             llama.launchCompletion(
                 id = context,
                 params = params

@@ -253,7 +253,8 @@ private fun StatusBar(
                     }
                     is GenerationState.Generating -> {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp))
-                        Text("Generating... (${state.tokensGenerated} tokens)")
+                        val label = if (state.tokensGenerated == 0) "Processing (this may take a while)..." else "Generating... (${state.tokensGenerated} tokens)"
+                        Text(label)
                     }
                     is GenerationState.Completed -> {
                         Text(
