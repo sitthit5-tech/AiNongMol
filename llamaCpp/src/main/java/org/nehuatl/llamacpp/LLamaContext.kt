@@ -23,27 +23,31 @@ class LlamaContext(
                 val cpuFeatures = getCpuFeatures()
                 Log.d(NAME, "CPU features: $cpuFeatures")
 
-                val hasFp16 = cpuFeatures.contains("fp16") || cpuFeatures.contains("fphp")
                 val hasDotProd = cpuFeatures.contains("dotprod") || cpuFeatures.contains("asimddp")
                 val isAtLeastArmV82 = cpuFeatures.contains("asimd") && cpuFeatures.contains("crc32") && cpuFeatures.contains("aes")
-                val isAtLeastArmV84 = cpuFeatures.contains("dcpop") && cpuFeatures.contains("uscat")
-                val hasInt8Matmul = cpuFeatures.contains("i8mm")
+                val hasI8mm = cpuFeatures.contains("i8mm")
 
-                if (isAtLeastArmV84 && hasFp16 && hasDotProd && hasInt8Matmul) {
-                    Log.d(NAME, "Loading librnllama_v8_4_fp16_dotprod_i8mm.so")
-                    System.loadLibrary("rnllama_v8_4_fp16_dotprod_i8mm")
-                } else if (isAtLeastArmV84 && hasFp16 && hasDotProd) {
-                    Log.d(NAME, "Loading librnllama_v8_4_fp16_dotprod.so")
-                    System.loadLibrary("rnllama_v8_4_fp16_dotprod")
-                } else if (isAtLeastArmV82 && hasFp16 && hasDotProd) {
-                    Log.d(NAME, "Loading librnllama_v8_2_fp16_dotprod.so")
-                    System.loadLibrary("rnllama_v8_2_fp16_dotprod")
-                } else if (isAtLeastArmV82 && hasFp16) {
-                    Log.d(NAME, "Loading librnllama_v8_2_fp16.so")
-                    System.loadLibrary("rnllama_v8_2_fp16")
-                } else {
-                    Log.d(NAME, "Loading librnllama_v8.so")
-                    System.loadLibrary("rnllama_v8")
+                when {
+                    isAtLeastArmV82 && hasDotProd && hasI8mm -> {
+                        Log.d(NAME, "Loading librnllama_v8_2_dotprod_i8mm.so")
+                        System.loadLibrary("rnllama_v8_2_dotprod_i8mm")
+                    }
+                    isAtLeastArmV82 && hasDotProd -> {
+                        Log.d(NAME, "Loading librnllama_v8_2_dotprod.so")
+                        System.loadLibrary("rnllama_v8_2_dotprod")
+                    }
+                    isAtLeastArmV82 && hasI8mm -> {
+                        Log.d(NAME, "Loading librnllama_v8_2_i8mm.so")
+                        System.loadLibrary("rnllama_v8_2_i8mm")
+                    }
+                    isAtLeastArmV82 -> {
+                        Log.d(NAME, "Loading librnllama_v8_2.so")
+                        System.loadLibrary("rnllama_v8_2")
+                    }
+                    else -> {
+                        Log.d(NAME, "Loading librnllama_v8.so")
+                        System.loadLibrary("rnllama_v8")
+                    }
                 }
             } else if (isX86_64()) {
                 Log.d(NAME, "Loading librnllama_x86_64.so")

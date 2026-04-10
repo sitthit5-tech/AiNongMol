@@ -8,6 +8,8 @@
 extern "C" {
 #endif
 
+    #define LM_GGML_BACKEND_API_VERSION 2
+
     //
     // Backend buffer type
     //
@@ -22,7 +24,7 @@ extern "C" {
         size_t                (*get_max_size)  (lm_ggml_backend_buffer_type_t buft);
         // (optional) data size needed to allocate the tensor, including padding (defaults to lm_ggml_nbytes)
         size_t                (*get_alloc_size)(lm_ggml_backend_buffer_type_t buft, const struct lm_ggml_tensor * tensor);
-        // (optional) check if tensor data is in host memory (defaults to false)
+        // (optional) check if tensor data is in host memory and uses standard ggml tensor layout (defaults to false)
         bool                  (*is_host)       (lm_ggml_backend_buffer_type_t buft);
     };
 
@@ -37,13 +39,12 @@ extern "C" {
     //
 
     struct lm_ggml_backend_buffer_i {
-        const char * (*get_name)     (lm_ggml_backend_buffer_t buffer);
         // (optional) free the buffer
         void         (*free_buffer)  (lm_ggml_backend_buffer_t buffer);
         // base address of the buffer
         void *       (*get_base)     (lm_ggml_backend_buffer_t buffer);
         // (optional) initialize a tensor in the buffer (eg. add tensor extras)
-        void         (*init_tensor)  (lm_ggml_backend_buffer_t buffer, struct lm_ggml_tensor * tensor);
+        enum lm_ggml_status (*init_tensor)(lm_ggml_backend_buffer_t buffer, struct lm_ggml_tensor * tensor);
         // tensor data access
         void         (*memset_tensor)(lm_ggml_backend_buffer_t buffer,       struct lm_ggml_tensor * tensor,     uint8_t value, size_t offset, size_t size);
         void         (*set_tensor)   (lm_ggml_backend_buffer_t buffer,       struct lm_ggml_tensor * tensor, const void * data, size_t offset, size_t size);
@@ -64,20 +65,20 @@ extern "C" {
         enum lm_ggml_backend_buffer_usage usage;
     };
 
-    lm_ggml_backend_buffer_t lm_ggml_backend_buffer_init(
+    LM_GGML_API lm_ggml_backend_buffer_t lm_ggml_backend_buffer_init(
                    lm_ggml_backend_buffer_type_t buft,
             struct lm_ggml_backend_buffer_i      iface,
                    void *                     context,
                    size_t                     size);
 
     // do not use directly, use lm_ggml_backend_tensor_copy instead
-    bool lm_ggml_backend_buffer_copy_tensor(const struct lm_ggml_tensor * src, struct lm_ggml_tensor * dst);
+    LM_GGML_API bool lm_ggml_backend_buffer_copy_tensor(const struct lm_ggml_tensor * src, struct lm_ggml_tensor * dst);
 
     // multi-buffer
     // buffer that contains a collection of buffers
-    lm_ggml_backend_buffer_t lm_ggml_backend_multi_buffer_alloc_buffer(lm_ggml_backend_buffer_t * buffers, size_t n_buffers);
-    bool                  lm_ggml_backend_buffer_is_multi_buffer(lm_ggml_backend_buffer_t buffer);
-    void                  lm_ggml_backend_multi_buffer_set_usage(lm_ggml_backend_buffer_t buffer, enum lm_ggml_backend_buffer_usage usage);
+    LM_GGML_API lm_ggml_backend_buffer_t lm_ggml_backend_multi_buffer_alloc_buffer(lm_ggml_backend_buffer_t * buffers, size_t n_buffers);
+    LM_GGML_API bool                  lm_ggml_backend_buffer_is_multi_buffer(lm_ggml_backend_buffer_t buffer);
+    LM_GGML_API void                  lm_ggml_backend_multi_buffer_set_usage(lm_ggml_backend_buffer_t buffer, enum lm_ggml_backend_buffer_usage usage);
 
     //
     // Backend (stream)
@@ -88,19 +89,16 @@ extern "C" {
 
         void (*free)(lm_ggml_backend_t backend);
 
-        // Will be moved to the device interface
-        // buffer allocation
-        lm_ggml_backend_buffer_type_t (*get_default_buffer_type)(lm_ggml_backend_t backend);
-
         // (optional) asynchronous tensor data access
         void (*set_tensor_async)(lm_ggml_backend_t backend,       struct lm_ggml_tensor * tensor, const void * data, size_t offset, size_t size);
         void (*get_tensor_async)(lm_ggml_backend_t backend, const struct lm_ggml_tensor * tensor,       void * data, size_t offset, size_t size);
         bool (*cpy_tensor_async)(lm_ggml_backend_t backend_src, lm_ggml_backend_t backend_dst, const struct lm_ggml_tensor * src, struct lm_ggml_tensor * dst);
 
-        // (optional) complete all pending operations
+        // (optional) complete all pending operations (required if the backend supports async operations)
         void (*synchronize)(lm_ggml_backend_t backend);
 
-        // (optional) compute graph with a plan (not used currently)
+        // (optional) graph plans (not used currently)
+        // compute graph with a plan
         lm_ggml_backend_graph_plan_t (*graph_plan_create) (lm_ggml_backend_t backend, const struct lm_ggml_cgraph * cgraph);
         void                      (*graph_plan_free)   (lm_ggml_backend_t backend, lm_ggml_backend_graph_plan_t plan);
         // update the plan with a new graph - this should be faster than creating a new plan when the graph has the same topology
@@ -111,18 +109,14 @@ extern "C" {
         // compute graph (always async if supported by the backend)
         enum lm_ggml_status          (*graph_compute)     (lm_ggml_backend_t backend, struct lm_ggml_cgraph * cgraph);
 
-        // IMPORTANT: these functions have been moved to the device interface and will be removed from the backend interface
-        //            new backends should implement the device interface instead
-        // These functions are being moved to the device interface
-        bool (*supports_op)  (lm_ggml_backend_t backend, const struct lm_ggml_tensor * op);
-        bool (*supports_buft)(lm_ggml_backend_t backend, lm_ggml_backend_buffer_type_t buft);
-        bool (*offload_op)   (lm_ggml_backend_t backend, const struct lm_ggml_tensor * op);
-
         // (optional) event synchronization
         // record an event on this stream
         void (*event_record)(lm_ggml_backend_t backend, lm_ggml_backend_event_t event);
         // wait for an event on on a different stream
         void (*event_wait)  (lm_ggml_backend_t backend, lm_ggml_backend_event_t event);
+
+        // (optional) sort/optimize the nodes in the graph
+        void                      (*graph_optimize)    (lm_ggml_backend_t backend, struct lm_ggml_cgraph * cgraph);
     };
 
     struct lm_ggml_backend {
@@ -150,7 +144,7 @@ extern "C" {
         // device description: short informative description of the device, could be the model name
         const char * (*get_description)(lm_ggml_backend_dev_t dev);
 
-        // device memory in bytes
+        // device memory in bytes: 0 bytes to indicate no memory to report
         void         (*get_memory)(lm_ggml_backend_dev_t dev, size_t * free, size_t * total);
 
         // device type
@@ -210,17 +204,51 @@ extern "C" {
     };
 
     struct lm_ggml_backend_reg {
-        // int api_version; // TODO: for dynamic loading
+        int api_version; // initialize to LM_GGML_BACKEND_API_VERSION
         struct lm_ggml_backend_reg_i iface;
         void * context;
     };
 
+    // Add backend dynamic loading support to the backend
 
-    // Internal backend registry API
-    void lm_ggml_backend_register(lm_ggml_backend_reg_t reg);
-    void lm_ggml_backend_device_register(lm_ggml_backend_dev_t device);
-    // TODO: backends can be loaded as a dynamic library, in which case it needs to export this function
-    // typedef lm_ggml_backend_register_t * (*lm_ggml_backend_init)(void);
+    // Initialize the backend
+    typedef lm_ggml_backend_reg_t (*lm_ggml_backend_init_t)(void);
+    // Optional: obtain a score for the backend based on the system configuration
+    // Higher scores are preferred, 0 means the backend is not supported in the current system
+    typedef int                (*lm_ggml_backend_score_t)(void);
+
+#ifdef LM_GGML_BACKEND_DL
+#    ifdef __cplusplus
+#        define LM_GGML_BACKEND_DL_IMPL(reg_fn)                             \
+            extern "C" {                                                 \
+            LM_GGML_BACKEND_API lm_ggml_backend_reg_t lm_ggml_backend_init(void); \
+            }                                                            \
+            lm_ggml_backend_reg_t lm_ggml_backend_init(void) {                 \
+                return reg_fn();                                         \
+            }
+#        define LM_GGML_BACKEND_DL_SCORE_IMPL(score_fn)       \
+            extern "C" {                                   \
+            LM_GGML_BACKEND_API int lm_ggml_backend_score(void); \
+            }                                              \
+            int lm_ggml_backend_score(void) {                 \
+                return score_fn();                         \
+            }
+#    else
+#        define LM_GGML_BACKEND_DL_IMPL(reg_fn)                              \
+            LM_GGML_BACKEND_API lm_ggml_backend_reg_t lm_ggml_backend_init(void);  \
+            lm_ggml_backend_reg_t                  lm_ggml_backend_init(void) { \
+                return reg_fn();                                          \
+            }
+#        define LM_GGML_BACKEND_DL_SCORE_IMPL(score_fn)        \
+            LM_GGML_BACKEND_API int lm_ggml_backend_score(void);  \
+            int                  lm_ggml_backend_score(void) { \
+                return score_fn();                          \
+            }
+#    endif
+#else
+#    define LM_GGML_BACKEND_DL_IMPL(reg_fn)
+#    define LM_GGML_BACKEND_DL_SCORE_IMPL(score_fn)
+#endif
 
 #ifdef  __cplusplus
 }

@@ -4,7 +4,6 @@ import android.content.ContentResolver
 import android.net.Uri
 import android.os.Build
 import android.util.Log
-import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -29,28 +28,26 @@ class LlamaAndroid(val resolver: ContentResolver) {
                 val cpuFeatures = getCpuFeatures()
                 Log.d(NAME, "CPU features: $cpuFeatures")
 
-                val hasFp16 = cpuFeatures.contains("fp16") || cpuFeatures.contains("fphp")
                 val hasDotProd = cpuFeatures.contains("dotprod") || cpuFeatures.contains("asimddp")
                 val isAtLeastArmV82 = cpuFeatures.contains("asimd") && cpuFeatures.contains("crc32") && cpuFeatures.contains("aes")
-                val isAtLeastArmV84 = cpuFeatures.contains("dcpop") && cpuFeatures.contains("uscat")
-                val hasInt8Matmul = cpuFeatures.contains("i8mm")
+                val hasI8mm = cpuFeatures.contains("i8mm")
 
                 when {
-                    isAtLeastArmV84 && hasFp16 && hasDotProd && hasInt8Matmul -> {
-                        Log.d(NAME, "Loading librnllama_v8_4_fp16_dotprod_i8mm.so")
-                        System.loadLibrary("rnllama_v8_4_fp16_dotprod_i8mm")
+                    isAtLeastArmV82 && hasDotProd && hasI8mm -> {
+                        Log.d(NAME, "Loading librnllama_v8_2_dotprod_i8mm.so")
+                        System.loadLibrary("rnllama_v8_2_dotprod_i8mm")
                     }
-                    isAtLeastArmV84 && hasFp16 && hasDotProd -> {
-                        Log.d(NAME, "Loading librnllama_v8_4_fp16_dotprod.so")
-                        System.loadLibrary("rnllama_v8_4_fp16_dotprod")
+                    isAtLeastArmV82 && hasDotProd -> {
+                        Log.d(NAME, "Loading librnllama_v8_2_dotprod.so")
+                        System.loadLibrary("rnllama_v8_2_dotprod")
                     }
-                    isAtLeastArmV82 && hasFp16 && hasDotProd -> {
-                        Log.d(NAME, "Loading librnllama_v8_2_fp16_dotprod.so")
-                        System.loadLibrary("rnllama_v8_2_fp16_dotprod")
+                    isAtLeastArmV82 && hasI8mm -> {
+                        Log.d(NAME, "Loading librnllama_v8_2_i8mm.so")
+                        System.loadLibrary("rnllama_v8_2_i8mm")
                     }
-                    isAtLeastArmV82 && hasFp16 -> {
-                        Log.d(NAME, "Loading librnllama_v8_2_fp16.so")
-                        System.loadLibrary("rnllama_v8_2_fp16")
+                    isAtLeastArmV82 -> {
+                        Log.d(NAME, "Loading librnllama_v8_2.so")
+                        System.loadLibrary("rnllama_v8_2")
                     }
                     else -> {
                         Log.d(NAME, "Loading librnllama_v8.so")
@@ -188,7 +185,7 @@ class LlamaAndroid(val resolver: ContentResolver) {
     }.flowOn(Dispatchers.IO)
 
     fun launchCompletion(id: Int, params: Map<String, Any>): Map<String, Any>?  {
-        Log.i(NAME, "completion $id of $params")
+        Log.i(NAME, "launchCompletion: completion $id of $params")
         return try {
             val context = contexts[id] ?: throw Exception("Context not found")
             if (context.isPredicting()) throw Exception("Context is busy")
